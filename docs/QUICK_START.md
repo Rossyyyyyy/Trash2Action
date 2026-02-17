@@ -81,3 +81,14 @@ Your app will automatically connect to the backend using the network IP. No conf
 - `npm run android` - Run on Android
 - `npm run ios` - Run on iOS
 - `npm run web` - Run in web browser
+
+
+accounts
+user
+email: anoosroschelmae@gmail.com
+password: Ros123anoos
+
+admin
+roschelanoos@gmail.com
+admin321
+Ros123anoos

@@ -1,4 +1,4 @@
-import { Text, View, StyleSheet, TouchableOpacity, TextInput, ScrollView, Alert, Image, ActivityIndicator } from "react-native";
+import { Text, View, StyleSheet, TouchableOpacity, TextInput, ScrollView, Alert, Image, ActivityIndicator, KeyboardAvoidingView, Platform } from "react-native";
 import { useState } from "react";
 import { LinearGradient } from "expo-linear-gradient";
 import { Ionicons } from '@expo/vector-icons';
@@ -163,8 +163,16 @@ export default function UserRegister({ navigation }) {
   if (registrationSuccess) {
     return (
       <LinearGradient colors={["#EAF7F1", "#C8E6C9", "#A5D6A7"]} style={styles.container}>
-        <ScrollView style={styles.scrollView} showsVerticalScrollIndicator={false}>
-          <View style={styles.content}>
+        <KeyboardAvoidingView 
+          behavior={Platform.OS === "ios" ? "padding" : "height"}
+          style={styles.keyboardView}
+        >
+          <ScrollView 
+            style={styles.scrollView} 
+            showsVerticalScrollIndicator={false}
+            keyboardShouldPersistTaps="handled"
+          >
+            <View style={styles.content}>
             <View style={styles.verificationContainer}>
               {/* Icon */}
               <View style={styles.verificationIconWrapper}>
@@ -214,6 +222,7 @@ export default function UserRegister({ navigation }) {
             </View>
           </View>
         </ScrollView>
+        </KeyboardAvoidingView>
       </LinearGradient>
     );
   }
@@ -221,8 +230,17 @@ export default function UserRegister({ navigation }) {
   // ─── RENDER: Registration Form ─────────────────────────────────────────────
   return (
     <LinearGradient colors={["#EAF7F1", "#C8E6C9", "#A5D6A7"]} style={styles.container}>
-      <ScrollView style={styles.scrollView} showsVerticalScrollIndicator={false}>
-        <View style={styles.content}>
+      <KeyboardAvoidingView 
+        behavior={Platform.OS === "ios" ? "padding" : "height"}
+        style={styles.keyboardView}
+      >
+        <ScrollView 
+          style={styles.scrollView} 
+          showsVerticalScrollIndicator={false}
+          keyboardShouldPersistTaps="handled"
+          contentContainerStyle={styles.scrollContent}
+        >
+          <View style={styles.content}>
           {/* Header */}
           <TouchableOpacity style={styles.backButton} onPress={() => navigation.goBack()}>
             <Ionicons name="arrow-back" size={24} color="#2E7D32" />
@@ -402,6 +420,7 @@ export default function UserRegister({ navigation }) {
           </View>
         </View>
       </ScrollView>
+      </KeyboardAvoidingView>
     </LinearGradient>
   );
 }
@@ -409,7 +428,9 @@ export default function UserRegister({ navigation }) {
 // ─── STYLES ──────────────────────────────────────────────────────────────────
 const styles = StyleSheet.create({
   container: { flex: 1 },
+  keyboardView: { flex: 1 },
   scrollView: { flex: 1 },
+  scrollContent: { flexGrow: 1 },
   content: { padding: 20, paddingTop: 40, paddingBottom: 40 },
 
   backButton: {

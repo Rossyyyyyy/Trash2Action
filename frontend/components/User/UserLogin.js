@@ -12,6 +12,7 @@ import { useState } from "react";
 import { LinearGradient } from "expo-linear-gradient";
 import { Ionicons } from "@expo/vector-icons";
 import { API_URL } from "../../config";
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 export default function UserLogin({ navigation }) {
   // ── Login state
@@ -71,10 +72,14 @@ export default function UserLogin({ navigation }) {
       const data = await response.json();
 
       if (response.ok && data.success) {
-        // ── Login successful - navigate to UserDashboard ──
+        // ── Login successful - Save to AsyncStorage and navigate ──
         console.log("✅ UserLogin - Login successful!");
         console.log("Token:", data.token);
         console.log("User:", data.user);
+        
+        // Save authentication data to AsyncStorage
+        await AsyncStorage.setItem('userToken', data.token);
+        await AsyncStorage.setItem('userData', JSON.stringify(data.user));
         
         // Navigate to UserDashboard with user data
         navigation.replace('UserDashboard', { 

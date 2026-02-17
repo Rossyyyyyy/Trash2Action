@@ -101,7 +101,7 @@ const SAMPLE_REPORTS = [
 ];
 
 export default function UserReports({ token, user }) {
-  const [reports] = useState(SAMPLE_REPORTS);
+  const [reports, setReports] = useState(SAMPLE_REPORTS);
   const [activeTab, setActiveTab] = useState("all");
   const [expandedId, setExpandedId] = useState(null);
 
@@ -110,6 +110,25 @@ export default function UserReports({ token, user }) {
     { id: "active", label: "Active" },
     { id: "completed", label: "Done" },
   ];
+
+  // ─── Delete/Cancel report ────────────────────────────────────────────────
+  const handleDeleteReport = (reportId, reportNo) => {
+    Alert.alert(
+      "Delete Report",
+      `Are you sure you want to delete report ${reportNo}?`,
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Delete",
+          style: "destructive",
+          onPress: () => {
+            setReports((prev) => prev.filter((r) => r.id !== reportId));
+            Alert.alert("Success", "Report deleted successfully");
+          },
+        },
+      ]
+    );
+  };
 
   const filteredReports = reports.filter((r) => {
     if (activeTab === "active") return ["pending", "inProgress", "verified"].includes(r.status);
@@ -225,6 +244,34 @@ export default function UserReports({ token, user }) {
                 {isExpanded && (
                   <View style={styles.reportDetail}>
                     <Text style={styles.reportDescription}>{report.description}</Text>
+                    
+                    {/* Status tracking */}
+                    <View style={styles.trackingSection}>
+                      <Text style={styles.trackingTitle}>Status Tracking</Text>
+                      <View style={styles.trackingSteps}>
+                        <TrackingStep 
+                          label="Submitted" 
+                          completed={true} 
+                          active={report.status === "pending"}
+                        />
+                        <TrackingStep 
+                          label="Verified" 
+                          completed={["verified", "inProgress", "completed"].includes(report.status)} 
+                          active={report.status === "verified"}
+                        />
+                        <TrackingStep 
+                          label="In Progress" 
+                          completed={["inProgress", "completed"].includes(report.status)} 
+                          active={report.status === "inProgress"}
+                        />
+                        <TrackingStep 
+                          label="Completed" 
+                          completed={report.status === "completed"} 
+                          active={report.status === "completed"}
+                        />
+                      </View>
+                    </View>
+
                     {report.pointsEarned > 0 && (
                       <View style={styles.pointsRow}>
                         <Ionicons name="trophy" size={15} color="#FB8C00" />
@@ -239,6 +286,28 @@ export default function UserReports({ token, user }) {
                         </Text>
                       </View>
                     )}
+
+                    {/* Action buttons */}
+                    <View style={styles.reportActions}>
+                      {["pending", "verified"].includes(report.status) && (
+                        <TouchableOpacity 
+                          style={styles.actionButton}
+                          onPress={() => Alert.alert("Edit Report", "Edit feature coming soon!")}
+                        >
+                          <Ionicons name="create-outline" size={18} color="#2196F3" />
+                          <Text style={styles.actionButtonText}>Edit</Text>
+                        </TouchableOpacity>
+                      )}
+                      <TouchableOpacity 
+                        style={[styles.actionButton, styles.actionButtonDanger]}
+                        onPress={() => handleDeleteReport(report.id, report.reportNo)}
+                      >
+                        <Ionicons name="trash-outline" size={18} color="#D32F2F" />
+                        <Text style={[styles.actionButtonText, styles.actionButtonTextDanger]}>
+                          {["pending"].includes(report.status) ? "Cancel" : "Delete"}
+                        </Text>
+                      </TouchableOpacity>
+                    </View>
                   </View>
                 )}
               </TouchableOpacity>
@@ -258,6 +327,28 @@ function SummaryItem({ icon, value, label, color }) {
       <Ionicons name={icon} size={18} color={color} />
       <Text style={[styles.summaryValue, { color }]}>{value}</Text>
       <Text style={styles.summaryLabel}>{label}</Text>
+    </View>
+  );
+}
+
+// ─── Tracking step ───────────────────────────────────────────────────────────
+function TrackingStep({ label, completed, active }) {
+  return (
+    <View style={styles.trackingStep}>
+      <View style={[
+        styles.trackingDot,
+        completed && styles.trackingDotCompleted,
+        active && styles.trackingDotActive
+      ]}>
+        {completed && <Ionicons name="checkmark" size={12} color="#FFFFFF" />}
+      </View>
+      <Text style={[
+        styles.trackingLabel,
+        completed && styles.trackingLabelCompleted,
+        active && styles.trackingLabelActive
+      ]}>
+        {label}
+      </Text>
     </View>
   );
 }
@@ -410,4 +501,23 @@ const styles = StyleSheet.create({
     marginTop: 8,
   },
   rejectedText: { fontSize: 12, color: "#D32F2F", flex: 1, lineHeight: 17 },
+
+  // Tracking
+  trackingSection: { marginBottom: 12, paddingVertical: 12, borderTopWidth: 1, borderTopColor: "#F0F0F0" },
+  trackingTitle: { fontSize: 13, fontWeight: "600", color: "#424242", marginBottom: 12 },
+  trackingSteps: { flexDirection: "row", justifyContent: "space-between" },
+  trackingStep: { alignItems: "center", flex: 1 },
+  trackingDot: { width: 24, height: 24, borderRadius: 12, backgroundColor: "#E0E0E0", justifyContent: "center", alignItems: "center", marginBottom: 6 },
+  trackingDotCompleted: { backgroundColor: "#43A047" },
+  trackingDotActive: { backgroundColor: "#2196F3", borderWidth: 2, borderColor: "#BBDEFB" },
+  trackingLabel: { fontSize: 10, color: "#9E9E9E", textAlign: "center" },
+  trackingLabelCompleted: { color: "#43A047", fontWeight: "600" },
+  trackingLabelActive: { color: "#2196F3", fontWeight: "600" },
+
+  // Actions
+  reportActions: { flexDirection: "row", gap: 10, marginTop: 12 },
+  actionButton: { flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, paddingVertical: 10, borderRadius: 8, borderWidth: 1, borderColor: "#2196F3", backgroundColor: "#E3F2FD" },
+  actionButtonDanger: { borderColor: "#FFCDD2", backgroundColor: "#FFEBEE" },
+  actionButtonText: { fontSize: 14, color: "#2196F3", fontWeight: "600" },
+  actionButtonTextDanger: { color: "#D32F2F" },
 });

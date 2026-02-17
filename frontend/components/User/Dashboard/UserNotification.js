@@ -1,4 +1,4 @@
-//Trash2Action/components/User/Dashboard/UserNotification.tsx
+//Trash2Action/components/User/Dashboard/UserNotification.js
 import {
   Text,
   View,
@@ -7,21 +7,9 @@ import {
   TouchableOpacity,
   Alert,
 } from "react-native";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { LinearGradient } from "expo-linear-gradient";
 import { Ionicons } from "@expo/vector-icons";
-
-interface UserNotificationProps {
-  token: string;
-  user: {
-    id: string;
-    fullName: string;
-    email: string;
-    gender: string;
-    profileImage: string | null;
-  };
-  onClear: () => void; // callback to reset badge count in parent
-}
 
 // ─── Sample notification data ────────────────────────────────────────────────
 const INITIAL_NOTIFICATIONS = [
@@ -87,14 +75,36 @@ const INITIAL_NOTIFICATIONS = [
   },
 ];
 
-export default function UserNotification({ token, user, onClear }: UserNotificationProps) {
+export default function UserNotification({ token, user, onClear }) {
   const [notifications, setNotifications] = useState(INITIAL_NOTIFICATIONS);
-  const [filter, setFilter] = useState<"all" | "unread">("all");
+  const [filter, setFilter] = useState("all");
+
+  // ─── Simulate real-time notifications ────────────────────────────────────
+  useEffect(() => {
+    const interval = setInterval(() => {
+      // Randomly add a new notification (10% chance every 30 seconds)
+      if (Math.random() < 0.1) {
+        const newNotif = {
+          id: `n-${Date.now()}`,
+          icon: "trophy",
+          iconColor: "#FB8C00",
+          bgColor: "#FFF3E0",
+          title: "New Activity!",
+          message: "You've earned points for your recent activity. Keep it up!",
+          time: "Just now",
+          read: false,
+        };
+        setNotifications((prev) => [newNotif, ...prev]);
+      }
+    }, 30000); // Check every 30 seconds
+
+    return () => clearInterval(interval);
+  }, []);
 
   const unreadCount = notifications.filter((n) => !n.read).length;
 
   // ─── Mark single notification as read ────────────────────────────────────
-  const markAsRead = (id: string) => {
+  const markAsRead = (id) => {
     setNotifications((prev) =>
       prev.map((n) => (n.id === id ? { ...n, read: true } : n))
     );
@@ -192,7 +202,7 @@ export default function UserNotification({ token, user, onClear }: UserNotificat
             >
               {/* Icon */}
               <View style={[styles.notifIcon, { backgroundColor: n.bgColor }]}>
-                <Ionicons name={n.icon as any} size={22} color={n.iconColor} />
+                <Ionicons name={n.icon} size={22} color={n.iconColor} />
               </View>
 
               {/* Content */}
