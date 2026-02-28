@@ -107,6 +107,20 @@ class SocketService {
     }
   }
 
+  // Listen for new notifications
+  onNewNotification(callback) {
+    if (this.socket) {
+      this.socket.on("new_notification", callback);
+    }
+  }
+
+  // Remove notification listener
+  offNewNotification() {
+    if (this.socket) {
+      this.socket.off("new_notification");
+    }
+  }
+
   isConnected() {
     return this.connected;
   }

@@ -10,6 +10,8 @@ import {
 } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
+import { API_URL } from "../../../config";
+import socketService from "../../../services/socket";
 
 const { width } = Dimensions.get("window");
 
@@ -18,6 +20,91 @@ export default function AdminDashboard({ navigation, route }) {
 
   const [activeFooter, setActiveFooter] = useState("home");
   const [refreshing, setRefreshing] = useState(false);
+  const [unreadCount, setUnreadCount] = useState(0);
+  const [dashboardStats, setDashboardStats] = useState({
+    totalUsers: 0,
+    totalResponders: 0,
+    pendingAdminRequests: 0,
+    totalPosts: 0,
+    recentPosts: 0,
+    weeklyData: [],
+    recentNewsfeedPosts: []
+  });
+  const [loading, setLoading] = useState(true);
+
+  // Fetch unread notification count
+  const fetchUnreadCount = async () => {
+    try {
+      if (!responder?.id) {
+        console.log("No responder ID available");
+        return;
+      }
+
+      const url = `${API_URL}/api/notifications?userId=${responder.id}&userType=responder`;
+      console.log("Fetching unread count from:", url);
+
+      const response = await fetch(url, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+      });
+
+      const contentType = response.headers.get("content-type");
+      if (!contentType || !contentType.includes("application/json")) {
+        console.error("Server returned non-JSON response");
+        return;
+      }
+
+      const data = await response.json();
+
+      if (data.success) {
+        setUnreadCount(data.unreadCount);
+      } else {
+        console.error("API error:", data.message);
+      }
+    } catch (error) {
+      console.error("Fetch unread count error:", error);
+    }
+  };
+
+  // Fetch dashboard statistics
+  const fetchDashboardStats = async () => {
+    try {
+      if (!token) {
+        console.log("No token available");
+        return;
+      }
+
+      const url = `${API_URL}/api/dashboard/stats`;
+      console.log("Fetching dashboard stats from:", url);
+
+      const response = await fetch(url, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+      });
+
+      const contentType = response.headers.get("content-type");
+      if (!contentType || !contentType.includes("application/json")) {
+        console.error("Server returned non-JSON response");
+        return;
+      }
+
+      const data = await response.json();
+
+      if (data.success) {
+        setDashboardStats(data.stats);
+      } else {
+        console.error("API error:", data.message);
+      }
+    } catch (error) {
+      console.error("Fetch dashboard stats error:", error);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   useEffect(() => {
     if (activeFooter === "newsfeed") {
@@ -26,12 +113,40 @@ export default function AdminDashboard({ navigation, route }) {
     } else if (activeFooter === "notifications") {
       navigation.navigate("AdminNotif", { token, responder });
       setActiveFooter("home");
+    } else if (activeFooter === "profile") {
+      navigation.navigate("AdminProfile", { token, responder });
+      setActiveFooter("home");
     }
   }, [activeFooter]);
 
-  const onRefresh = () => {
+  // Setup Socket.IO for real-time notifications
+  useEffect(() => {
+    if (responder?.id) {
+      // Connect to socket
+      socketService.connect(responder.id);
+
+      // Listen for new notifications
+      socketService.onNewNotification(() => {
+        setUnreadCount(prev => prev + 1);
+      });
+
+      // Fetch initial data with a small delay
+      const timer = setTimeout(() => {
+        fetchUnreadCount();
+        fetchDashboardStats();
+      }, 500);
+
+      return () => {
+        clearTimeout(timer);
+        socketService.offNewNotification();
+      };
+    }
+  }, [responder?.id]);
+
+  const onRefresh = async () => {
     setRefreshing(true);
-    setTimeout(() => setRefreshing(false), 1000);
+    await Promise.all([fetchUnreadCount(), fetchDashboardStats()]);
+    setRefreshing(false);
   };
 
   // Simple chart component
@@ -54,15 +169,25 @@ export default function AdminDashboard({ navigation, route }) {
 
   // Render Home Screen with Analytics
   const renderHomeScreen = () => {
-    const weeklyData = [
-      { label: "Mon", value: 12, colors: ["#4CAF50", "#66BB6A"] },
-      { label: "Tue", value: 19, colors: ["#2196F3", "#42A5F5"] },
-      { label: "Wed", value: 15, colors: ["#FF9800", "#FFA726"] },
-      { label: "Thu", value: 22, colors: ["#9C27B0", "#AB47BC"] },
-      { label: "Fri", value: 18, colors: ["#F44336", "#EF5350"] },
-      { label: "Sat", value: 8, colors: ["#00BCD4", "#26C6DA"] },
-      { label: "Sun", value: 5, colors: ["#FF5722", "#FF7043"] },
-    ];
+    // Transform weekly data from API
+    const weeklyData = dashboardStats.weeklyData.map((item, index) => {
+      const colors = [
+        ["#4CAF50", "#66BB6A"], // Mon
+        ["#2196F3", "#42A5F5"], // Tue
+        ["#FF9800", "#FFA726"], // Wed
+        ["#9C27B0", "#AB47BC"], // Thu
+        ["#F44336", "#EF5350"], // Fri
+        ["#00BCD4", "#26C6DA"], // Sat
+        ["#FF5722", "#FF7043"], // Sun
+      ];
+      return {
+        label: item.day,
+        value: item.count,
+        colors: colors[index] || ["#78909C", "#90A4AE"]
+      };
+    });
+
+    const maxValue = Math.max(...weeklyData.map(d => d.value), 1);
 
     return (
       <View style={styles.container}>
@@ -86,174 +211,212 @@ export default function AdminDashboard({ navigation, route }) {
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
         >
           <View style={styles.scrollContent}>
-            {/* Quick Stats Grid */}
-            <View style={styles.statsGrid}>
-              <LinearGradient colors={["#2196F3", "#1976D2"]} style={styles.statCard}>
-                <View style={styles.statIconCircle}>
-                  <Ionicons name="document-text" size={28} color="#FFFFFF" />
-                </View>
-                <Text style={styles.statNumber}>247</Text>
-                <Text style={styles.statLabel}>Total Reports</Text>
-                <View style={styles.statBadge}>
-                  <Ionicons name="trending-up" size={12} color="#4CAF50" />
-                  <Text style={styles.statBadgeText}>+12%</Text>
-                </View>
-              </LinearGradient>
-
-              <LinearGradient colors={["#FF9800", "#F57C00"]} style={styles.statCard}>
-                <View style={styles.statIconCircle}>
-                  <Ionicons name="time" size={28} color="#FFFFFF" />
-                </View>
-                <Text style={styles.statNumber}>38</Text>
-                <Text style={styles.statLabel}>Pending</Text>
-                <View style={styles.statBadge}>
-                  <Ionicons name="alert-circle" size={12} color="#FF5722" />
-                  <Text style={styles.statBadgeText}>Urgent</Text>
-                </View>
-              </LinearGradient>
-
-              <LinearGradient colors={["#4CAF50", "#388E3C"]} style={styles.statCard}>
-                <View style={styles.statIconCircle}>
-                  <Ionicons name="checkmark-circle" size={28} color="#FFFFFF" />
-                </View>
-                <Text style={styles.statNumber}>189</Text>
-                <Text style={styles.statLabel}>Resolved</Text>
-                <View style={styles.statBadge}>
-                  <Ionicons name="trending-up" size={12} color="#4CAF50" />
-                  <Text style={styles.statBadgeText}>+8%</Text>
-                </View>
-              </LinearGradient>
-
-              <LinearGradient colors={["#9C27B0", "#7B1FA2"]} style={styles.statCard}>
-                <View style={styles.statIconCircle}>
-                  <Ionicons name="people" size={28} color="#FFFFFF" />
-                </View>
-                <Text style={styles.statNumber}>1,234</Text>
-                <Text style={styles.statLabel}>Active Users</Text>
-                <View style={styles.statBadge}>
-                  <Ionicons name="trending-up" size={12} color="#4CAF50" />
-                  <Text style={styles.statBadgeText}>+24</Text>
-                </View>
-              </LinearGradient>
-            </View>
-
-            {/* Weekly Reports Chart */}
-            <View style={styles.chartCard}>
-              <View style={styles.chartHeader}>
-                <View>
-                  <Text style={styles.chartTitle}>Weekly Reports</Text>
-                  <Text style={styles.chartSubtitle}>Last 7 days activity</Text>
-                </View>
-                <TouchableOpacity style={styles.chartButton}>
-                  <Text style={styles.chartButtonText}>View All</Text>
-                  <Ionicons name="chevron-forward" size={16} color="#2E7D32" />
-                </TouchableOpacity>
+            {loading ? (
+              <View style={{ padding: 40, alignItems: "center" }}>
+                <Text style={{ color: "#666", fontSize: 16 }}>Loading dashboard...</Text>
               </View>
-              <SimpleBarChart data={weeklyData} maxValue={25} />
-            </View>
-
-            {/* Quick Actions */}
-            <Text style={styles.sectionTitle}>Quick Actions</Text>
-            <View style={styles.actionsGrid}>
-              <TouchableOpacity 
-                style={styles.actionCard}
-                onPress={() => navigation.navigate("AdminRequest", { token, responder })}
-              >
-                <LinearGradient colors={["#FFF3E0", "#FFE0B2"]} style={styles.actionGradient}>
-                  <Ionicons name="person-add" size={32} color="#F57C00" />
-                </LinearGradient>
-                <Text style={styles.actionTitle}>Admin Requests</Text>
-                <Text style={styles.actionSubtitle}>Review pending</Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity style={styles.actionCard}>
-                <LinearGradient colors={["#E3F2FD", "#BBDEFB"]} style={styles.actionGradient}>
-                  <Ionicons name="document-text" size={32} color="#1976D2" />
-                </LinearGradient>
-                <Text style={styles.actionTitle}>View Reports</Text>
-                <Text style={styles.actionSubtitle}>All submissions</Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity style={styles.actionCard}>
-                <LinearGradient colors={["#F3E5F5", "#E1BEE7"]} style={styles.actionGradient}>
-                  <Ionicons name="people" size={32} color="#7B1FA2" />
-                </LinearGradient>
-                <Text style={styles.actionTitle}>Manage Users</Text>
-                <Text style={styles.actionSubtitle}>User accounts</Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity style={styles.actionCard}>
-                <LinearGradient colors={["#E8F5E9", "#C8E6C9"]} style={styles.actionGradient}>
-                  <MaterialCommunityIcons name="shield-account" size={32} color="#388E3C" />
-                </LinearGradient>
-                <Text style={styles.actionTitle}>Responders</Text>
-                <Text style={styles.actionSubtitle}>Field teams</Text>
-              </TouchableOpacity>
-            </View>
-
-            {/* Recent Reports */}
-            <View style={styles.recentSection}>
-              <View style={styles.sectionHeader}>
-                <Text style={styles.sectionTitle}>Recent Reports</Text>
-                <TouchableOpacity>
-                  <Text style={styles.seeAllText}>See All</Text>
-                </TouchableOpacity>
-              </View>
-
-              <View style={styles.reportCard}>
-                <View style={styles.reportHeader}>
-                  <View style={[styles.reportStatus, { backgroundColor: "#FFF3E0" }]}>
-                    <Ionicons name="time" size={16} color="#F57C00" />
-                    <Text style={[styles.reportStatusText, { color: "#F57C00" }]}>Pending</Text>
-                  </View>
-                  <Text style={styles.reportTime}>2 hours ago</Text>
-                </View>
-                <Text style={styles.reportTitle}>Illegal dumping at Creek 5</Text>
-                <Text style={styles.reportLocation}>
-                  <Ionicons name="location" size={14} color="#666" /> South Cembo, Makati
-                </Text>
-                <View style={styles.reportFooter}>
-                  <View style={styles.reportUser}>
-                    <View style={styles.userAvatar}>
-                      <Text style={styles.userAvatarText}>JD</Text>
+            ) : (
+              <>
+                {/* Quick Stats Grid */}
+                <View style={styles.statsGrid}>
+                  <LinearGradient colors={["#2196F3", "#1976D2"]} style={styles.statCard}>
+                    <View style={styles.statIconCircle}>
+                      <Ionicons name="newspaper" size={28} color="#FFFFFF" />
                     </View>
-                    <Text style={styles.userName}>John Doe</Text>
+                    <Text style={styles.statNumber}>{dashboardStats.totalPosts}</Text>
+                    <Text style={styles.statLabel}>Total Posts</Text>
+                    <View style={styles.statBadge}>
+                      <Ionicons name="trending-up" size={12} color="#4CAF50" />
+                      <Text style={styles.statBadgeText}>+{dashboardStats.recentPosts} this week</Text>
+                    </View>
+                  </LinearGradient>
+
+                  <LinearGradient colors={["#FF9800", "#F57C00"]} style={styles.statCard}>
+                    <View style={styles.statIconCircle}>
+                      <Ionicons name="time" size={28} color="#FFFFFF" />
+                    </View>
+                    <Text style={styles.statNumber}>{dashboardStats.pendingAdminRequests}</Text>
+                    <Text style={styles.statLabel}>Pending Requests</Text>
+                    <View style={styles.statBadge}>
+                      <Ionicons name="alert-circle" size={12} color="#FF5722" />
+                      <Text style={styles.statBadgeText}>
+                        {dashboardStats.pendingAdminRequests > 0 ? "Needs Review" : "All Clear"}
+                      </Text>
+                    </View>
+                  </LinearGradient>
+
+                  <LinearGradient colors={["#4CAF50", "#388E3C"]} style={styles.statCard}>
+                    <View style={styles.statIconCircle}>
+                      <MaterialCommunityIcons name="shield-account" size={28} color="#FFFFFF" />
+                    </View>
+                    <Text style={styles.statNumber}>{dashboardStats.totalResponders}</Text>
+                    <Text style={styles.statLabel}>Responders</Text>
+                    <View style={styles.statBadge}>
+                      <Ionicons name="checkmark-circle" size={12} color="#4CAF50" />
+                      <Text style={styles.statBadgeText}>Active</Text>
+                    </View>
+                  </LinearGradient>
+
+                  <LinearGradient colors={["#9C27B0", "#7B1FA2"]} style={styles.statCard}>
+                    <View style={styles.statIconCircle}>
+                      <Ionicons name="people" size={28} color="#FFFFFF" />
+                    </View>
+                    <Text style={styles.statNumber}>{dashboardStats.totalUsers}</Text>
+                    <Text style={styles.statLabel}>Active Users</Text>
+                    <View style={styles.statBadge}>
+                      <Ionicons name="trending-up" size={12} color="#4CAF50" />
+                      <Text style={styles.statBadgeText}>Verified</Text>
+                    </View>
+                  </LinearGradient>
+                </View>
+
+                {/* Weekly Reports Chart */}
+                <View style={styles.chartCard}>
+                  <View style={styles.chartHeader}>
+                    <View>
+                      <Text style={styles.chartTitle}>Weekly Activity</Text>
+                      <Text style={styles.chartSubtitle}>Last 7 days posts</Text>
+                    </View>
+                    <TouchableOpacity style={styles.chartButton}>
+                      <Text style={styles.chartButtonText}>View All</Text>
+                      <Ionicons name="chevron-forward" size={16} color="#2E7D32" />
+                    </TouchableOpacity>
                   </View>
-                  <TouchableOpacity style={styles.viewButton}>
-                    <Text style={styles.viewButtonText}>View</Text>
+                  <SimpleBarChart data={weeklyData} maxValue={maxValue} />
+                </View>
+
+                {/* Quick Actions */}
+                <Text style={styles.sectionTitle}>Quick Actions</Text>
+                <View style={styles.actionsGrid}>
+                  <TouchableOpacity 
+                    style={styles.actionCard}
+                    onPress={() => navigation.navigate("AdminRequest", { token, responder })}
+                  >
+                    <LinearGradient colors={["#FFF3E0", "#FFE0B2"]} style={styles.actionGradient}>
+                      <Ionicons name="person-add" size={32} color="#F57C00" />
+                    </LinearGradient>
+                    <Text style={styles.actionTitle}>Admin Requests</Text>
+                    <Text style={styles.actionSubtitle}>
+                      {dashboardStats.pendingAdminRequests} pending
+                    </Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity 
+                    style={styles.actionCard}
+                    onPress={() => navigation.navigate("AdminNewsfeed", { token, responder })}
+                  >
+                    <LinearGradient colors={["#E3F2FD", "#BBDEFB"]} style={styles.actionGradient}>
+                      <Ionicons name="newspaper" size={32} color="#1976D2" />
+                    </LinearGradient>
+                    <Text style={styles.actionTitle}>Newsfeed</Text>
+                    <Text style={styles.actionSubtitle}>{dashboardStats.totalPosts} posts</Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity 
+                    style={styles.actionCard}
+                    onPress={() => navigation.navigate("AdminUsers", { token, responder })}
+                  >
+                    <LinearGradient colors={["#F3E5F5", "#E1BEE7"]} style={styles.actionGradient}>
+                      <Ionicons name="people" size={32} color="#7B1FA2" />
+                    </LinearGradient>
+                    <Text style={styles.actionTitle}>Manage Users</Text>
+                    <Text style={styles.actionSubtitle}>{dashboardStats.totalUsers} users</Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity 
+                    style={styles.actionCard}
+                    onPress={() => navigation.navigate("AdminResponders", { token, responder })}
+                  >
+                    <LinearGradient colors={["#E8F5E9", "#C8E6C9"]} style={styles.actionGradient}>
+                      <MaterialCommunityIcons name="shield-account" size={32} color="#388E3C" />
+                    </LinearGradient>
+                    <Text style={styles.actionTitle}>Responders</Text>
+                    <Text style={styles.actionSubtitle}>{dashboardStats.totalResponders} active</Text>
                   </TouchableOpacity>
                 </View>
-              </View>
 
-              <View style={styles.reportCard}>
-                <View style={styles.reportHeader}>
-                  <View style={[styles.reportStatus, { backgroundColor: "#E8F5E9" }]}>
-                    <Ionicons name="checkmark-circle" size={16} color="#388E3C" />
-                    <Text style={[styles.reportStatusText, { color: "#388E3C" }]}>Resolved</Text>
-                  </View>
-                  <Text style={styles.reportTime}>5 hours ago</Text>
-                </View>
-                <Text style={styles.reportTitle}>Trash accumulation near bridge</Text>
-                <Text style={styles.reportLocation}>
-                  <Ionicons name="location" size={14} color="#666" /> Barangay 1, Makati
-                </Text>
-                <View style={styles.reportFooter}>
-                  <View style={styles.reportUser}>
-                    <View style={styles.userAvatar}>
-                      <Text style={styles.userAvatarText}>MS</Text>
+                {/* Recent Posts */}
+                {dashboardStats.recentNewsfeedPosts.length > 0 && (
+                  <View style={styles.recentSection}>
+                    <View style={styles.sectionHeader}>
+                      <Text style={styles.sectionTitle}>Recent Posts</Text>
+                      <TouchableOpacity onPress={() => navigation.navigate("AdminNewsfeed", { token, responder })}>
+                        <Text style={styles.seeAllText}>See All</Text>
+                      </TouchableOpacity>
                     </View>
-                    <Text style={styles.userName}>Maria Santos</Text>
+
+                    {dashboardStats.recentNewsfeedPosts.slice(0, 3).map((post, index) => {
+                      const timeAgo = getTimeAgo(new Date(post.createdAt));
+                      const authorName = post.authorId?.fullName || "Unknown User";
+                      const initials = authorName.split(" ").map(n => n[0]).join("").toUpperCase();
+                      
+                      return (
+                        <View key={post._id || index} style={styles.reportCard}>
+                          <View style={styles.reportHeader}>
+                            <View style={[styles.reportStatus, { backgroundColor: "#E3F2FD" }]}>
+                              <Ionicons name="newspaper" size={16} color="#1976D2" />
+                              <Text style={[styles.reportStatusText, { color: "#1976D2" }]}>Post</Text>
+                            </View>
+                            <Text style={styles.reportTime}>{timeAgo}</Text>
+                          </View>
+                          <Text style={styles.reportTitle} numberOfLines={2}>
+                            {post.content || "No content"}
+                          </Text>
+                          <View style={styles.reportFooter}>
+                            <View style={styles.reportUser}>
+                              <View style={styles.userAvatar}>
+                                <Text style={styles.userAvatarText}>{initials}</Text>
+                              </View>
+                              <Text style={styles.userName}>{authorName}</Text>
+                            </View>
+                            <View style={{ flexDirection: "row", gap: 12 }}>
+                              <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
+                                <Ionicons name="heart" size={16} color="#F44336" />
+                                <Text style={{ fontSize: 13, color: "#666" }}>
+                                  {post.likedBy?.length || 0}
+                                </Text>
+                              </View>
+                              <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
+                                <Ionicons name="chatbubble" size={16} color="#2196F3" />
+                                <Text style={{ fontSize: 13, color: "#666" }}>
+                                  {post.comments?.length || 0}
+                                </Text>
+                              </View>
+                            </View>
+                          </View>
+                        </View>
+                      );
+                    })}
                   </View>
-                  <TouchableOpacity style={styles.viewButton}>
-                    <Text style={styles.viewButtonText}>View</Text>
-                  </TouchableOpacity>
-                </View>
-              </View>
-            </View>
+                )}
+              </>
+            )}
           </View>
         </ScrollView>
       </View>
     );
+  };
+
+  // Helper function to format time ago
+  const getTimeAgo = (date) => {
+    const seconds = Math.floor((new Date() - date) / 1000);
+    
+    let interval = seconds / 31536000;
+    if (interval > 1) return Math.floor(interval) + " years ago";
+    
+    interval = seconds / 2592000;
+    if (interval > 1) return Math.floor(interval) + " months ago";
+    
+    interval = seconds / 86400;
+    if (interval > 1) return Math.floor(interval) + " days ago";
+    
+    interval = seconds / 3600;
+    if (interval > 1) return Math.floor(interval) + " hours ago";
+    
+    interval = seconds / 60;
+    if (interval > 1) return Math.floor(interval) + " minutes ago";
+    
+    return "Just now";
   };
 
   // Render Newsfeed Screen
@@ -262,103 +425,8 @@ export default function AdminDashboard({ navigation, route }) {
   // Render Notifications Screen
   const renderNotificationsScreen = () => null;
 
-  // Render Profile Screen
-  const renderProfileScreen = () => (
-    <View style={styles.container}>
-      <LinearGradient colors={["#2E7D32", "#43A047", "#66BB6A"]} style={styles.headerLarge}>
-        <View style={styles.profileHeaderContent}>
-          <View style={styles.profileAvatarLarge}>
-            <Text style={styles.profileAvatarTextLarge}>
-              {responder?.fullName?.charAt(0) || "A"}
-            </Text>
-          </View>
-          <Text style={styles.profileNameLarge}>{responder?.fullName || "Administrator"}</Text>
-          <View style={styles.profileBadge}>
-            <Ionicons name="shield-checkmark" size={16} color="#FFFFFF" />
-            <Text style={styles.profileBadgeText}>{responder?.accountType || "ADMIN"}</Text>
-          </View>
-        </View>
-      </LinearGradient>
-
-      <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
-        <View style={styles.scrollContent}>
-          {/* Profile Info Card */}
-          <View style={styles.profileInfoCard}>
-            <View style={styles.profileInfoRow}>
-              <Ionicons name="mail" size={20} color="#666" />
-              <Text style={styles.profileInfoText}>{responder?.email || "admin@example.com"}</Text>
-            </View>
-            <View style={styles.profileInfoRow}>
-              <Ionicons name="call" size={20} color="#666" />
-              <Text style={styles.profileInfoText}>{responder?.phone || "N/A"}</Text>
-            </View>
-            <View style={styles.profileInfoRow}>
-              <Ionicons name="location" size={20} color="#666" />
-              <Text style={styles.profileInfoText}>{responder?.barangay || "N/A"}</Text>
-            </View>
-            <View style={styles.profileInfoRow}>
-              <Ionicons name="id-card" size={20} color="#666" />
-              <Text style={styles.profileInfoText}>{responder?.employeeId || "N/A"}</Text>
-            </View>
-          </View>
-
-          {/* Menu Options */}
-          <View style={styles.menuSection}>
-            <TouchableOpacity style={styles.menuItem}>
-              <View style={styles.menuIconWrapper}>
-                <Ionicons name="person-outline" size={22} color="#2E7D32" />
-              </View>
-              <Text style={styles.menuText}>Edit Profile</Text>
-              <Ionicons name="chevron-forward" size={22} color="#BDBDBD" />
-            </TouchableOpacity>
-
-            <TouchableOpacity style={styles.menuItem}>
-              <View style={styles.menuIconWrapper}>
-                <Ionicons name="lock-closed-outline" size={22} color="#2E7D32" />
-              </View>
-              <Text style={styles.menuText}>Change Password</Text>
-              <Ionicons name="chevron-forward" size={22} color="#BDBDBD" />
-            </TouchableOpacity>
-
-            <TouchableOpacity style={styles.menuItem}>
-              <View style={styles.menuIconWrapper}>
-                <Ionicons name="notifications-outline" size={22} color="#2E7D32" />
-              </View>
-              <Text style={styles.menuText}>Notification Settings</Text>
-              <Ionicons name="chevron-forward" size={22} color="#BDBDBD" />
-            </TouchableOpacity>
-
-            <TouchableOpacity style={styles.menuItem}>
-              <View style={styles.menuIconWrapper}>
-                <Ionicons name="shield-checkmark-outline" size={22} color="#2E7D32" />
-              </View>
-              <Text style={styles.menuText}>Privacy & Security</Text>
-              <Ionicons name="chevron-forward" size={22} color="#BDBDBD" />
-            </TouchableOpacity>
-
-            <TouchableOpacity style={styles.menuItem}>
-              <View style={styles.menuIconWrapper}>
-                <Ionicons name="help-circle-outline" size={22} color="#2E7D32" />
-              </View>
-              <Text style={styles.menuText}>Help & Support</Text>
-              <Ionicons name="chevron-forward" size={22} color="#BDBDBD" />
-            </TouchableOpacity>
-
-            <TouchableOpacity 
-              style={[styles.menuItem, styles.logoutMenuItem]} 
-              onPress={() => navigation.replace("Home")}
-            >
-              <View style={styles.menuIconWrapper}>
-                <Ionicons name="log-out-outline" size={22} color="#D32F2F" />
-              </View>
-              <Text style={[styles.menuText, styles.logoutText]}>Logout</Text>
-              <Ionicons name="chevron-forward" size={22} color="#BDBDBD" />
-            </TouchableOpacity>
-          </View>
-        </View>
-      </ScrollView>
-    </View>
-  );
+  // Render Profile Screen - Navigate to dedicated AdminProfile component
+  const renderProfileScreen = () => null;
 
   return (
     <View style={styles.mainContainer}>
@@ -398,9 +466,11 @@ export default function AdminDashboard({ navigation, route }) {
               size={26} 
               color={activeFooter === "notifications" ? "#2E7D32" : "#9E9E9E"} 
             />
-            <View style={styles.notificationBadge}>
-              <Text style={styles.notificationBadgeText}>2</Text>
-            </View>
+            {unreadCount > 0 && (
+              <View style={styles.notificationBadge}>
+                <Text style={styles.notificationBadgeText}>{unreadCount}</Text>
+              </View>
+            )}
           </View>
           <Text style={[styles.footerText, activeFooter === "notifications" && styles.footerTextActive]}>
             Notifications
@@ -644,83 +714,6 @@ const styles = StyleSheet.create({
     borderRadius: 5, 
     backgroundColor: "#2E7D32" 
   },
-
-  // Profile
-  profileHeaderContent: { alignItems: "center" },
-  profileAvatarLarge: { 
-    width: 100, 
-    height: 100, 
-    borderRadius: 50, 
-    backgroundColor: "rgba(255,255,255,0.3)", 
-    justifyContent: "center", 
-    alignItems: "center", 
-    marginBottom: 16, 
-    borderWidth: 4, 
-    borderColor: "rgba(255,255,255,0.5)" 
-  },
-  profileAvatarTextLarge: { fontSize: 40, fontWeight: "bold", color: "#FFFFFF" },
-  profileNameLarge: { fontSize: 24, fontWeight: "bold", color: "#FFFFFF", marginBottom: 8 },
-  profileBadge: { 
-    flexDirection: "row", 
-    alignItems: "center", 
-    backgroundColor: "rgba(255,255,255,0.25)", 
-    paddingHorizontal: 16, 
-    paddingVertical: 6, 
-    borderRadius: 20, 
-    gap: 6 
-  },
-  profileBadgeText: { fontSize: 13, fontWeight: "600", color: "#FFFFFF" },
-  profileInfoCard: { 
-    backgroundColor: "#FFFFFF", 
-    borderRadius: 16, 
-    padding: 20, 
-    marginBottom: 20, 
-    shadowColor: "#000", 
-    shadowOffset: { width: 0, height: 2 }, 
-    shadowOpacity: 0.08, 
-    shadowRadius: 8, 
-    elevation: 2 
-  },
-  profileInfoRow: { 
-    flexDirection: "row", 
-    alignItems: "center", 
-    paddingVertical: 12, 
-    borderBottomWidth: 1, 
-    borderBottomColor: "#F5F5F5", 
-    gap: 12 
-  },
-  profileInfoText: { fontSize: 14, color: "#666", flex: 1 },
-  
-  // Menu
-  menuSection: { 
-    backgroundColor: "#FFFFFF", 
-    borderRadius: 16, 
-    overflow: "hidden", 
-    shadowColor: "#000", 
-    shadowOffset: { width: 0, height: 2 }, 
-    shadowOpacity: 0.08, 
-    shadowRadius: 8, 
-    elevation: 2 
-  },
-  menuItem: { 
-    flexDirection: "row", 
-    alignItems: "center", 
-    padding: 16, 
-    borderBottomWidth: 1, 
-    borderBottomColor: "#F5F5F5" 
-  },
-  menuIconWrapper: { 
-    width: 40, 
-    height: 40, 
-    borderRadius: 20, 
-    backgroundColor: "#E8F5E9", 
-    justifyContent: "center", 
-    alignItems: "center", 
-    marginRight: 12 
-  },
-  menuText: { flex: 1, fontSize: 15, color: "#212121", fontWeight: "500" },
-  logoutMenuItem: { borderBottomWidth: 0 },
-  logoutText: { color: "#D32F2F", fontWeight: "600" },
   
   // Footer
   footer: { 

@@ -10,31 +10,54 @@ import { useState, useEffect } from "react";
 import { LinearGradient } from "expo-linear-gradient";
 import { Ionicons } from "@expo/vector-icons";
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { API_URL } from "../../../config";
 
 // ─── Import actual components ────────────────────────────────────────────────
 import UserNF from "./UserNF";
 import UserNotification from "./UserNotification";
-import UserReports from "./UserReports";
+import UserReports from "../Reports/UserReports";
 import UserProfile from "./UserProfile";
 import UserMessage from "./UserMessage";
-
-// ─── Change this to your local IP ────────────────────────────────────────────
-const BASE_URL = "http://10.249.213.103:5000";
 
 export default function UserDashboard({ route, navigation }) {
   // ✅ Get token and user from route params OR AsyncStorage
   const [token, setToken] = useState(route.params?.token || null);
   const [user, setUser] = useState(route.params?.user || null);
   const [activeTab, setActiveTab] = useState("dashboard");
-  const [notificationCount, setNotificationCount] = useState(3);
+  const [notificationCount, setNotificationCount] = useState(0);
   const [isLoading, setIsLoading] = useState(true);
   const [showMessages, setShowMessages] = useState(false);
-  const [unreadMessages, setUnreadMessages] = useState(2);
+  const [unreadMessages, setUnreadMessages] = useState(0);
 
   // ─── Load user data from AsyncStorage if not in route params ────────────
   useEffect(() => {
     loadUserData();
   }, []);
+
+  // ─── Fetch unread notification count ────────────────────────────────────
+  useEffect(() => {
+    if (user?.id && token) {
+      fetchUnreadCount();
+    }
+  }, [user?.id, token]);
+
+  const fetchUnreadCount = async () => {
+    try {
+      const response = await fetch(`${API_URL}/api/notifications?userId=${user.id}&userType=user`, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+      });
+
+      const data = await response.json();
+      if (data.success) {
+        setNotificationCount(data.unreadCount || 0);
+      }
+    } catch (error) {
+      console.error("Error fetching unread count:", error);
+    }
+  };
 
   const loadUserData = async () => {
     try {
@@ -117,6 +140,7 @@ export default function UserDashboard({ route, navigation }) {
             token={token}
             user={user}
             onClear={() => setNotificationCount(0)}
+            onUpdateUnread={(count) => setNotificationCount(count)}
           />
         );
       case "reports":
@@ -217,11 +241,44 @@ export default function UserDashboard({ route, navigation }) {
 // ─── DASHBOARD HOME (inline — the default tab content) ──────────────────────
 function DashboardHome({ token, user, onLogout }) {
   const [chartPeriod, setChartPeriod] = useState("week");
+  const [dashboardData, setDashboardData] = useState(null);
+  const [loading, setLoading] = useState(true);
   
-  // Sample chart data
+  // Fetch dashboard data from backend
+  useEffect(() => {
+    fetchDashboardData();
+  }, []);
+
+  const fetchDashboardData = async () => {
+    try {
+      setLoading(true);
+      const response = await fetch(`${API_URL}/api/dashboard/stats`, {
+        method: "GET",
+        headers: {
+          "Authorization": `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+      });
+
+      const data = await response.json();
+      
+      if (data.success) {
+        setDashboardData(data.stats);
+        console.log("✅ Dashboard data loaded:", data.stats);
+      } else {
+        console.error("❌ Failed to fetch dashboard data:", data.message);
+      }
+    } catch (error) {
+      console.error("❌ Error fetching dashboard data:", error);
+    } finally {
+      setLoading(false);
+    }
+  };
+  
+  // Chart data from backend or fallback to sample data
   const chartData = {
-    week: [3, 5, 2, 8, 4, 6, 7],
-    month: [12, 18, 15, 22, 19, 25, 28, 24, 30, 27, 32, 35],
+    week: dashboardData?.weeklyData?.map(d => d.count) || [3, 5, 2, 8, 4, 6, 7],
+    month: [12, 18, 15, 22, 19, 25, 28, 24, 30, 27, 32, 35], // Monthly data not yet implemented in backend
   };
 
   return (
@@ -245,9 +302,24 @@ function DashboardHome({ token, user, onLogout }) {
 
         {/* Stats cards row */}
         <View style={styles.statsRow}>
-          <StatCard icon="leaf" label="Reports" value="12" color="#43A047" />
-          <StatCard icon="trophy" label="Points" value="840" color="#FB8C00" />
-          <StatCard icon="star" label="Rank" value="#5" color="#8E24AA" />
+          <StatCard 
+            icon="leaf" 
+            label="Reports" 
+            value={loading ? "..." : (dashboardData?.totalPosts || 0).toString()} 
+            color="#43A047" 
+          />
+          <StatCard 
+            icon="trophy" 
+            label="Points" 
+            value={loading ? "..." : "840"} 
+            color="#FB8C00" 
+          />
+          <StatCard 
+            icon="star" 
+            label="Rank" 
+            value={loading ? "..." : "#5"} 
+            color="#8E24AA" 
+          />
         </View>
 
         {/* Activity Chart */}
@@ -279,30 +351,26 @@ function DashboardHome({ token, user, onLogout }) {
         {/* Recent activity card */}
         <View style={styles.sectionCard}>
           <Text style={styles.sectionTitle}>Recent Activity</Text>
-          <ActivityItem
-            icon="checkmark-circle"
-            iconColor="#43A047"
-            text="Submitted a waste report"
-            time="2 hours ago"
-          />
-          <ActivityItem
-            icon="notifications"
-            iconColor="#FB8C00"
-            text="Received 50 points reward"
-            time="1 day ago"
-          />
-          <ActivityItem
-            icon="people"
-            iconColor="#2196F3"
-            text="Joined Community Group #3"
-            time="3 days ago"
-          />
-          <ActivityItem
-            icon="trophy"
-            iconColor="#8E24AA"
-            text="Reached Silver level"
-            time="5 days ago"
-          />
+          {loading ? (
+            <Text style={styles.loadingText}>Loading activity...</Text>
+          ) : dashboardData?.recentNewsfeedPosts && dashboardData.recentNewsfeedPosts.length > 0 ? (
+            dashboardData.recentNewsfeedPosts.slice(0, 4).map((post, index) => (
+              <ActivityItem
+                key={post._id || index}
+                icon="newspaper"
+                iconColor="#43A047"
+                text={post.title || "New post"}
+                time={formatTimeAgo(post.createdAt)}
+              />
+            ))
+          ) : (
+            <ActivityItem
+              icon="information-circle"
+              iconColor="#9E9E9E"
+              text="No recent activity"
+              time="Start by creating a post!"
+            />
+          )}
         </View>
 
         {/* Quick actions */}
@@ -313,6 +381,76 @@ function DashboardHome({ token, user, onLogout }) {
             <QuickAction icon="map" label="Find Bins" color="#2196F3" />
             <QuickAction icon="share" label="Invite" color="#FF7043" />
             <QuickAction icon="help-circle" label="Help" color="#9C27B0" />
+          </View>
+        </View>
+
+        {/* Waste Management Actions */}
+        <View style={styles.sectionCard}>
+          <Text style={styles.sectionTitle}>Waste Management</Text>
+          
+          <View style={styles.collageGrid}>
+            <TouchableOpacity style={[styles.collageButton, styles.collageButtonLarge]} activeOpacity={0.8}>
+              <LinearGradient
+                colors={["#4CAF50", "#66BB6A"]}
+                style={styles.collageGradient}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 1 }}
+              >
+                <Ionicons name="trash-bin" size={32} color="#FFFFFF" />
+                <Text style={styles.collageTitle}>Check Basura Type</Text>
+                <Text style={styles.collageSubtitle}>Classify waste</Text>
+              </LinearGradient>
+            </TouchableOpacity>
+
+            <TouchableOpacity style={[styles.collageButton, styles.collageButtonSmall]} activeOpacity={0.8}>
+              <LinearGradient
+                colors={["#FF9800", "#FFB74D"]}
+                style={styles.collageGradient}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 1 }}
+              >
+                <Ionicons name="document-text" size={28} color="#FFFFFF" />
+                <Text style={styles.collageTitle}>Report Status</Text>
+              </LinearGradient>
+            </TouchableOpacity>
+
+            <TouchableOpacity style={[styles.collageButton, styles.collageButtonSmall]} activeOpacity={0.8}>
+              <LinearGradient
+                colors={["#2196F3", "#42A5F5"]}
+                style={styles.collageGradient}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 1 }}
+              >
+                <Ionicons name="car" size={28} color="#FFFFFF" />
+                <Text style={styles.collageTitle}>Pickup Basura</Text>
+              </LinearGradient>
+            </TouchableOpacity>
+
+            <TouchableOpacity style={[styles.collageButton, styles.collageButtonMedium]} activeOpacity={0.8}>
+              <LinearGradient
+                colors={["#9C27B0", "#BA68C8"]}
+                style={styles.collageGradient}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 1 }}
+              >
+                <Ionicons name="calendar" size={30} color="#FFFFFF" />
+                <Text style={styles.collageTitle}>Pickup Schedule</Text>
+                <Text style={styles.collageSubtitle}>View dates</Text>
+              </LinearGradient>
+            </TouchableOpacity>
+
+            <TouchableOpacity style={[styles.collageButton, styles.collageButtonMedium]} activeOpacity={0.8}>
+              <LinearGradient
+                colors={["#F44336", "#EF5350"]}
+                style={styles.collageGradient}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 1 }}
+              >
+                <Ionicons name="trophy" size={30} color="#FFFFFF" />
+                <Text style={styles.collageTitle}>Leaderboard</Text>
+                <Text style={styles.collageSubtitle}>Top users</Text>
+              </LinearGradient>
+            </TouchableOpacity>
           </View>
         </View>
 
@@ -400,6 +538,24 @@ function SimpleBarChart({ data }) {
       })}
     </View>
   );
+}
+
+// ─── HELPER FUNCTIONS ────────────────────────────────────────────────────────
+function formatTimeAgo(dateString) {
+  if (!dateString) return "Recently";
+  
+  const now = new Date();
+  const past = new Date(dateString);
+  const diffMs = now - past;
+  const diffMins = Math.floor(diffMs / 60000);
+  const diffHours = Math.floor(diffMs / 3600000);
+  const diffDays = Math.floor(diffMs / 86400000);
+  
+  if (diffMins < 1) return "Just now";
+  if (diffMins < 60) return `${diffMins} min${diffMins > 1 ? 's' : ''} ago`;
+  if (diffHours < 24) return `${diffHours} hour${diffHours > 1 ? 's' : ''} ago`;
+  if (diffDays < 7) return `${diffDays} day${diffDays > 1 ? 's' : ''} ago`;
+  return past.toLocaleDateString();
 }
 
 // ─── STYLES ──────────────────────────────────────────────────────────────────
@@ -534,6 +690,58 @@ const styles = StyleSheet.create({
   achievementTitle: { fontSize: 14, fontWeight: "600", color: "#212121" },
   achievementDesc: { fontSize: 12, color: "#757575", marginTop: 2 },
 
+  // Collage button styles
+  collageGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 10,
+  },
+  collageButton: {
+    borderRadius: 16,
+    overflow: "hidden",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.15,
+    shadowRadius: 6,
+    elevation: 5,
+  },
+  collageButtonLarge: {
+    width: "100%",
+    height: 140,
+  },
+  collageButtonMedium: {
+    width: "48%",
+    height: 120,
+  },
+  collageButtonSmall: {
+    width: "48%",
+    height: 100,
+  },
+  collageGradient: {
+    width: "100%",
+    height: "100%",
+    justifyContent: "center",
+    alignItems: "center",
+    padding: 16,
+  },
+  collageTitle: {
+    fontSize: 16,
+    fontWeight: "700",
+    color: "#FFFFFF",
+    marginTop: 8,
+    textAlign: "center",
+    textShadowColor: "rgba(0, 0, 0, 0.2)",
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 3,
+  },
+  collageSubtitle: {
+    fontSize: 12,
+    color: "#FFFFFF",
+    marginTop: 2,
+    opacity: 0.9,
+    textAlign: "center",
+  },
+
   footer: {
     flexDirection: "row",
     backgroundColor: "#FFFFFF",
@@ -620,5 +828,12 @@ const styles = StyleSheet.create({
     fontSize: 10,
     color: "#FFFFFF",
     fontWeight: "bold",
+  },
+  
+  loadingText: {
+    fontSize: 13,
+    color: "#9E9E9E",
+    textAlign: "center",
+    paddingVertical: 12,
   },
 });

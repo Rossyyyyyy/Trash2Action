@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import {
   Text,
   View,
@@ -6,17 +6,204 @@ import {
   TouchableOpacity,
   ScrollView,
   RefreshControl,
+  Alert,
 } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import { Ionicons } from "@expo/vector-icons";
+import { API_URL } from "../../../config";
+import socketService from "../../../services/socket";
 
 export default function AdminNotif({ navigation, route }) {
   const { token, responder } = route.params || {};
   const [refreshing, setRefreshing] = useState(false);
+  const [notifications, setNotifications] = useState([]);
+  const [unreadCount, setUnreadCount] = useState(0);
+  const [loading, setLoading] = useState(true);
 
-  const onRefresh = () => {
+  // Fetch notifications
+  const fetchNotifications = async () => {
+    try {
+      if (!responder?.id) {
+        console.log("No responder ID available");
+        return;
+      }
+
+      const url = `${API_URL}/api/notifications?userId=${responder.id}&userType=responder`;
+      console.log("Fetching notifications from:", url);
+
+      const response = await fetch(url, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+      });
+
+      const contentType = response.headers.get("content-type");
+      if (!contentType || !contentType.includes("application/json")) {
+        console.error("Server returned non-JSON response:", await response.text());
+        return;
+      }
+
+      const data = await response.json();
+
+      if (data.success) {
+        setNotifications(data.notifications);
+        setUnreadCount(data.unreadCount);
+      } else {
+        console.error("API error:", data.message);
+      }
+    } catch (error) {
+      console.error("Fetch notifications error:", error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Mark all as read
+  const markAllAsRead = async () => {
+    try {
+      const response = await fetch(`${API_URL}/api/notifications/mark-all-read`, {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          userId: responder.id,
+          userType: "responder",
+        }),
+      });
+
+      const data = await response.json();
+
+      if (data.success) {
+        setNotifications(notifications.map(n => ({ ...n, read: true })));
+        setUnreadCount(0);
+      }
+    } catch (error) {
+      console.error("Mark all as read error:", error);
+    }
+  };
+
+  // Mark single notification as read
+  const markAsRead = async (notificationId) => {
+    try {
+      await fetch(`${API_URL}/api/notifications/${notificationId}/read`, {
+        method: "PUT",
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
+
+      setNotifications(notifications.map(n => 
+        n.id === notificationId ? { ...n, read: true } : n
+      ));
+      setUnreadCount(prev => Math.max(0, prev - 1));
+    } catch (error) {
+      console.error("Mark as read error:", error);
+    }
+  };
+
+  // Delete notification
+  const deleteNotification = async (notificationId) => {
+    try {
+      const response = await fetch(`${API_URL}/api/notifications/${notificationId}`, {
+        method: "DELETE",
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
+
+      const data = await response.json();
+
+      if (data.success) {
+        const deletedNotif = notifications.find(n => n.id === notificationId);
+        setNotifications(notifications.filter(n => n.id !== notificationId));
+        if (deletedNotif && !deletedNotif.read) {
+          setUnreadCount(prev => Math.max(0, prev - 1));
+        }
+      }
+    } catch (error) {
+      console.error("Delete notification error:", error);
+    }
+  };
+
+  // Handle notification click
+  const handleNotificationClick = (notification) => {
+    if (!notification.read) {
+      markAsRead(notification.id);
+    }
+
+    // Navigate based on notification type
+    if (notification.type === "admin_request") {
+      navigation.navigate("AdminRequest", { token, responder });
+    } else if (notification.type === "post") {
+      navigation.navigate("AdminNewsfeed", { token, responder });
+    } else if (notification.type === "report") {
+      // Navigate to reports page when implemented
+      Alert.alert("Report", notification.message);
+    }
+  };
+
+  const onRefresh = async () => {
     setRefreshing(true);
-    setTimeout(() => setRefreshing(false), 1000);
+    await fetchNotifications();
+    setRefreshing(false);
+  };
+
+  // Setup Socket.IO and fetch initial data
+  useEffect(() => {
+    if (responder?.id) {
+      // Connect to socket
+      socketService.connect(responder.id);
+
+      // Listen for new notifications
+      socketService.onNewNotification((notification) => {
+        console.log("📬 New notification received:", notification);
+        
+        // Add new notification to the list
+        const newNotif = {
+          id: Date.now().toString(),
+          type: notification.type,
+          title: notification.title,
+          message: notification.message,
+          read: false,
+          time: "Just now",
+          timestamp: notification.timestamp,
+        };
+        
+        setNotifications(prev => [newNotif, ...prev]);
+        setUnreadCount(prev => prev + 1);
+
+        // Show alert for important notifications
+        if (notification.type === "admin_request") {
+          Alert.alert(notification.title, notification.message);
+        }
+      });
+
+      // Fetch initial notifications with a small delay
+      const timer = setTimeout(() => {
+        fetchNotifications();
+      }, 500);
+
+      return () => {
+        clearTimeout(timer);
+        socketService.offNewNotification();
+      };
+    }
+  }, [responder?.id]);
+
+  // Get icon and color based on notification type
+  const getNotificationStyle = (type) => {
+    const styles = {
+      admin_request: { icon: "person-add", color: "#2196F3" },
+      post: { icon: "newspaper", color: "#9C27B0" },
+      report: { icon: "alert-circle", color: "#FF9800" },
+      comment: { icon: "chatbubble", color: "#43A047" },
+      like: { icon: "heart", color: "#F44336" },
+      system: { icon: "information-circle", color: "#2E7D32" },
+    };
+    return styles[type] || styles.system;
   };
 
   return (
@@ -26,11 +213,15 @@ export default function AdminNotif({ navigation, route }) {
           <View style={styles.headerContent}>
             <View>
               <Text style={styles.headerTitle}>Notifications</Text>
-              <Text style={styles.headerSubtitle}>Stay updated with alerts</Text>
+              <Text style={styles.headerSubtitle}>
+                {unreadCount > 0 ? `${unreadCount} unread` : "All caught up!"}
+              </Text>
             </View>
-            <TouchableOpacity style={styles.markAllButton}>
-              <Text style={styles.markAllText}>Mark all read</Text>
-            </TouchableOpacity>
+            {unreadCount > 0 && (
+              <TouchableOpacity style={styles.markAllButton} onPress={markAllAsRead}>
+                <Text style={styles.markAllText}>Mark all read</Text>
+              </TouchableOpacity>
+            )}
           </View>
         </LinearGradient>
 
@@ -40,76 +231,54 @@ export default function AdminNotif({ navigation, route }) {
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
         >
           <View style={styles.scrollContent}>
-            <TouchableOpacity 
-              style={[styles.notifCard, styles.notifUnread]}
-              onPress={() => navigation.navigate("AdminRequest", { token, responder })}
-            >
-              <View style={styles.notifIcon}>
-                <Ionicons name="person-add" size={24} color="#2196F3" />
+            {loading ? (
+              <View style={styles.loadingContainer}>
+                <Text style={styles.loadingText}>Loading notifications...</Text>
               </View>
-              <View style={styles.notifContent}>
-                <Text style={styles.notifTitle}>New Admin Request</Text>
-                <Text style={styles.notifText}>John Smith requested admin access</Text>
-                <Text style={styles.notifTime}>5 minutes ago</Text>
+            ) : notifications.length === 0 ? (
+              <View style={styles.emptyContainer}>
+                <Ionicons name="notifications-off-outline" size={64} color="#BDBDBD" />
+                <Text style={styles.emptyText}>No notifications yet</Text>
+                <Text style={styles.emptySubtext}>
+                  You'll be notified when users submit reports or create posts
+                </Text>
               </View>
-              <View style={styles.notifDot} />
-            </TouchableOpacity>
-
-            <TouchableOpacity style={[styles.notifCard, styles.notifUnread]}>
-              <View style={styles.notifIcon}>
-                <Ionicons name="alert-circle" size={24} color="#FF9800" />
-              </View>
-              <View style={styles.notifContent}>
-                <Text style={styles.notifTitle}>Urgent Report</Text>
-                <Text style={styles.notifText}>New report requires immediate attention</Text>
-                <Text style={styles.notifTime}>1 hour ago</Text>
-              </View>
-              <View style={styles.notifDot} />
-            </TouchableOpacity>
-
-            <TouchableOpacity style={styles.notifCard}>
-              <View style={styles.notifIcon}>
-                <Ionicons name="checkmark-circle" size={24} color="#4CAF50" />
-              </View>
-              <View style={styles.notifContent}>
-                <Text style={styles.notifTitle}>Report Resolved</Text>
-                <Text style={styles.notifText}>Creek cleanup completed successfully</Text>
-                <Text style={styles.notifTime}>3 hours ago</Text>
-              </View>
-            </TouchableOpacity>
-
-            <TouchableOpacity style={styles.notifCard}>
-              <View style={styles.notifIcon}>
-                <Ionicons name="people" size={24} color="#9C27B0" />
-              </View>
-              <View style={styles.notifContent}>
-                <Text style={styles.notifTitle}>New User Registered</Text>
-                <Text style={styles.notifText}>Maria Santos joined the platform</Text>
-                <Text style={styles.notifTime}>Yesterday</Text>
-              </View>
-            </TouchableOpacity>
-
-            <TouchableOpacity style={styles.notifCard}>
-              <View style={styles.notifIcon}>
-                <Ionicons name="trash" size={24} color="#F44336" />
-              </View>
-              <View style={styles.notifContent}>
-                <Text style={styles.notifTitle}>Report Submitted</Text>
-                <Text style={styles.notifText}>Illegal dumping reported at Creek 5</Text>
-                <Text style={styles.notifTime}>2 days ago</Text>
-              </View>
-            </TouchableOpacity>
-
-            <TouchableOpacity style={styles.notifCard}>
-              <View style={styles.notifIcon}>
-                <Ionicons name="shield-checkmark" size={24} color="#2E7D32" />
-              </View>
-              <View style={styles.notifContent}>
-                <Text style={styles.notifTitle}>Responder Assigned</Text>
-                <Text style={styles.notifText}>Field team dispatched to location</Text>
-                <Text style={styles.notifTime}>3 days ago</Text>
-              </View>
-            </TouchableOpacity>
+            ) : (
+              notifications.map((notif) => {
+                const style = getNotificationStyle(notif.type);
+                return (
+                  <TouchableOpacity 
+                    key={notif.id}
+                    style={[styles.notifCard, !notif.read && styles.notifUnread]}
+                    onPress={() => handleNotificationClick(notif)}
+                    onLongPress={() => {
+                      Alert.alert(
+                        "Delete Notification",
+                        "Are you sure you want to delete this notification?",
+                        [
+                          { text: "Cancel", style: "cancel" },
+                          { 
+                            text: "Delete", 
+                            style: "destructive",
+                            onPress: () => deleteNotification(notif.id)
+                          },
+                        ]
+                      );
+                    }}
+                  >
+                    <View style={styles.notifIcon}>
+                      <Ionicons name={style.icon} size={24} color={style.color} />
+                    </View>
+                    <View style={styles.notifContent}>
+                      <Text style={styles.notifTitle}>{notif.title}</Text>
+                      <Text style={styles.notifText}>{notif.message}</Text>
+                      <Text style={styles.notifTime}>{notif.time}</Text>
+                    </View>
+                    {!notif.read && <View style={styles.notifDot} />}
+                  </TouchableOpacity>
+                );
+              })
+            )}
           </View>
         </ScrollView>
       </View>
@@ -135,9 +304,11 @@ export default function AdminNotif({ navigation, route }) {
         <TouchableOpacity style={styles.footerButton}>
           <View>
             <Ionicons name="notifications" size={26} color="#2E7D32" />
-            <View style={styles.notificationBadge}>
-              <Text style={styles.notificationBadgeText}>2</Text>
-            </View>
+            {unreadCount > 0 && (
+              <View style={styles.notificationBadge}>
+                <Text style={styles.notificationBadgeText}>{unreadCount}</Text>
+              </View>
+            )}
           </View>
           <Text style={[styles.footerText, styles.footerTextActive]}>Notifications</Text>
         </TouchableOpacity>
@@ -233,4 +404,35 @@ const styles = StyleSheet.create({
     borderColor: "#FFFFFF" 
   },
   notificationBadgeText: { fontSize: 10, color: "#FFFFFF", fontWeight: "bold" },
+  
+  // Loading & Empty states
+  loadingContainer: { 
+    alignItems: "center", 
+    justifyContent: "center", 
+    paddingTop: 60 
+  },
+  loadingText: { 
+    fontSize: 14, 
+    color: "#757575", 
+    marginTop: 12 
+  },
+  emptyContainer: { 
+    alignItems: "center", 
+    justifyContent: "center", 
+    paddingTop: 60,
+    paddingHorizontal: 40,
+  },
+  emptyText: { 
+    fontSize: 16, 
+    color: "#757575", 
+    marginTop: 16,
+    fontWeight: "600",
+  },
+  emptySubtext: {
+    fontSize: 13,
+    color: "#9E9E9E",
+    marginTop: 8,
+    textAlign: "center",
+    lineHeight: 20,
+  },
 });

@@ -6,129 +6,226 @@ import {
   ScrollView,
   TouchableOpacity,
   Alert,
+  RefreshControl,
 } from "react-native";
 import { useState, useEffect } from "react";
 import { LinearGradient } from "expo-linear-gradient";
 import { Ionicons } from "@expo/vector-icons";
+import { API_URL } from "../../../config";
+import socketService from "../../../services/socket";
 
-// ─── Sample notification data ────────────────────────────────────────────────
-const INITIAL_NOTIFICATIONS = [
-  {
-    id: "n1",
-    icon: "trophy",
-    iconColor: "#FB8C00",
-    bgColor: "#FFF3E0",
-    title: "Points Reward!",
-    message: "You earned 50 points for submitting a waste report in your area.",
-    time: "10 min ago",
-    read: false,
-  },
-  {
-    id: "n2",
-    icon: "checkmark-circle",
-    iconColor: "#43A047",
-    bgColor: "#E8F5E9",
-    title: "Report Verified",
-    message: "Your waste report #1042 has been verified by local authorities.",
-    time: "1 hour ago",
-    read: false,
-  },
-  {
-    id: "n3",
-    icon: "people",
-    iconColor: "#2196F3",
-    bgColor: "#E3F2FD",
-    title: "New Community Event",
-    message: "EcoClub Philippines has announced a clean-up drive this Saturday at BGC Park.",
-    time: "3 hours ago",
-    read: false,
-  },
-  {
-    id: "n4",
-    icon: "star",
-    iconColor: "#8E24AA",
-    bgColor: "#F3E5F5",
-    title: "Rank Update",
-    message: "Congratulations! You moved up to Rank #5 in your community this month.",
-    time: "Yesterday",
-    read: true,
-  },
-  {
-    id: "n5",
-    icon: "information-circle",
-    iconColor: "#607D8B",
-    bgColor: "#ECEFF1",
-    title: "App Update Available",
-    message: "A new version of Trash2Action is available. Update now for the latest features.",
-    time: "2 days ago",
-    read: true,
-  },
-  {
-    id: "n6",
-    icon: "alert-circle",
-    iconColor: "#D32F2F",
-    bgColor: "#FFEBEE",
-    title: "Incomplete Report",
-    message: "Your report #1038 is missing a photo. Please update it to earn full points.",
-    time: "3 days ago",
-    read: true,
-  },
-];
-
-export default function UserNotification({ token, user, onClear }) {
-  const [notifications, setNotifications] = useState(INITIAL_NOTIFICATIONS);
+export default function UserNotification({ token, user, onClear, onUpdateUnread }) {
+  const [notifications, setNotifications] = useState([]);
   const [filter, setFilter] = useState("all");
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
 
-  // ─── Simulate real-time notifications ────────────────────────────────────
-  useEffect(() => {
-    const interval = setInterval(() => {
-      // Randomly add a new notification (10% chance every 30 seconds)
-      if (Math.random() < 0.1) {
-        const newNotif = {
-          id: `n-${Date.now()}`,
-          icon: "trophy",
-          iconColor: "#FB8C00",
-          bgColor: "#FFF3E0",
-          title: "New Activity!",
-          message: "You've earned points for your recent activity. Keep it up!",
-          time: "Just now",
-          read: false,
-        };
-        setNotifications((prev) => [newNotif, ...prev]);
+  // Fetch notifications from API
+  const fetchNotifications = async () => {
+    try {
+      if (!user?.id) {
+        console.log("No user ID available");
+        return;
       }
-    }, 30000); // Check every 30 seconds
 
-    return () => clearInterval(interval);
-  }, []);
+      const url = `${API_URL}/api/notifications?userId=${user.id}&userType=user`;
+      console.log("Fetching notifications from:", url);
+
+      const response = await fetch(url, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+      });
+
+      const contentType = response.headers.get("content-type");
+      if (!contentType || !contentType.includes("application/json")) {
+        console.error("Server returned non-JSON response:", await response.text());
+        return;
+      }
+
+      const data = await response.json();
+
+      if (data.success) {
+        setNotifications(data.notifications);
+        // Update unread count in parent component
+        if (onUpdateUnread) {
+          onUpdateUnread(data.unreadCount || 0);
+        }
+      } else {
+        console.error("API error:", data.message);
+      }
+    } catch (error) {
+      console.error("Fetch notifications error:", error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Setup Socket.IO and fetch initial data
+  useEffect(() => {
+    if (user?.id) {
+      // Connect to socket
+      socketService.connect(user.id);
+
+      // Listen for new notifications
+      socketService.onNewNotification((notification) => {
+        console.log("📬 New notification received:", notification);
+        
+        // Add new notification to the list
+        const newNotif = {
+          id: Date.now().toString(),
+          type: notification.type,
+          title: notification.title,
+          message: notification.message,
+          read: false,
+          time: "Just now",
+          timestamp: notification.timestamp,
+        };
+        
+        setNotifications(prev => {
+          const updated = [newNotif, ...prev];
+          // Update unread count
+          const unreadCount = updated.filter(n => !n.read).length;
+          if (onUpdateUnread) {
+            onUpdateUnread(unreadCount);
+          }
+          return updated;
+        });
+      });
+
+      // Fetch initial notifications
+      const timer = setTimeout(() => {
+        fetchNotifications();
+      }, 500);
+
+      return () => {
+        clearTimeout(timer);
+        socketService.offNewNotification();
+      };
+    }
+  }, [user?.id]);
 
   const unreadCount = notifications.filter((n) => !n.read).length;
 
-  // ─── Mark single notification as read ────────────────────────────────────
-  const markAsRead = (id) => {
-    setNotifications((prev) =>
-      prev.map((n) => (n.id === id ? { ...n, read: true } : n))
-    );
+  // Mark single notification as read
+  const markAsRead = async (notificationId) => {
+    try {
+      await fetch(`${API_URL}/api/notifications/${notificationId}/read`, {
+        method: "PUT",
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
+
+      setNotifications(prev => {
+        const updated = prev.map(n => 
+          n.id === notificationId ? { ...n, read: true } : n
+        );
+        // Update unread count
+        const unreadCount = updated.filter(n => !n.read).length;
+        if (onUpdateUnread) {
+          onUpdateUnread(unreadCount);
+        }
+        return updated;
+      });
+    } catch (error) {
+      console.error("Mark as read error:", error);
+    }
   };
 
-  // ─── Mark all as read ────────────────────────────────────────────────────
-  const markAllAsRead = () => {
-    setNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
-    onClear();
+  // Mark all as read
+  const markAllAsRead = async () => {
+    try {
+      const response = await fetch(`${API_URL}/api/notifications/mark-all-read`, {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          userId: user.id,
+          userType: "user",
+        }),
+      });
+
+      const data = await response.json();
+
+      if (data.success) {
+        setNotifications(notifications.map(n => ({ ...n, read: true })));
+        if (onClear) onClear();
+        if (onUpdateUnread) onUpdateUnread(0);
+      }
+    } catch (error) {
+      console.error("Mark all as read error:", error);
+    }
   };
 
-  // ─── Clear all ───────────────────────────────────────────────────────────
+  // Delete notification
+  const deleteNotification = async (notificationId) => {
+    try {
+      const response = await fetch(`${API_URL}/api/notifications/${notificationId}`, {
+        method: "DELETE",
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
+
+      const data = await response.json();
+
+      if (data.success) {
+        setNotifications(prev => {
+          const updated = prev.filter(n => n.id !== notificationId);
+          // Update unread count
+          const unreadCount = updated.filter(n => !n.read).length;
+          if (onUpdateUnread) {
+            onUpdateUnread(unreadCount);
+          }
+          return updated;
+        });
+      }
+    } catch (error) {
+      console.error("Delete notification error:", error);
+    }
+  };
+
+  // Clear all notifications
   const clearAll = () => {
     Alert.alert("Clear All", "Are you sure you want to clear all notifications?", [
       { text: "Cancel", style: "cancel" },
       {
         text: "Clear",
         style: "destructive",
-        onPress: () => {
-          setNotifications([]);
-          onClear();
+        onPress: async () => {
+          // Delete all notifications
+          for (const notif of notifications) {
+            await deleteNotification(notif.id);
+          }
+          if (onClear) onClear();
         },
       },
     ]);
+  };
+
+  // Refresh notifications
+  const onRefresh = async () => {
+    setRefreshing(true);
+    await fetchNotifications();
+    setRefreshing(false);
+  };
+
+  // Get icon and color based on notification type
+  const getNotificationStyle = (type) => {
+    const styles = {
+      report: { icon: "alert-circle", iconColor: "#FF9800", bgColor: "#FFF3E0" },
+      post: { icon: "newspaper", iconColor: "#9C27B0", bgColor: "#F3E5F5" },
+      comment: { icon: "chatbubble", iconColor: "#43A047", bgColor: "#E8F5E9" },
+      like: { icon: "heart", iconColor: "#F44336", bgColor: "#FFEBEE" },
+      points: { icon: "trophy", iconColor: "#FB8C00", bgColor: "#FFF3E0" },
+      verified: { icon: "checkmark-circle", iconColor: "#43A047", bgColor: "#E8F5E9" },
+      system: { icon: "information-circle", iconColor: "#607D8B", bgColor: "#ECEFF1" },
+    };
+    return styles[type] || styles.system;
   };
 
   const displayed =
@@ -175,8 +272,16 @@ export default function UserNotification({ token, user, onClear }) {
       </View>
 
       {/* Notification list */}
-      <ScrollView style={styles.scrollView} showsVerticalScrollIndicator={false}>
-        {displayed.length === 0 ? (
+      <ScrollView 
+        style={styles.scrollView} 
+        showsVerticalScrollIndicator={false}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
+      >
+        {loading ? (
+          <View style={styles.emptyContainer}>
+            <Text style={styles.emptyTitle}>Loading notifications...</Text>
+          </View>
+        ) : displayed.length === 0 ? (
           <View style={styles.emptyContainer}>
             <Ionicons
               name={filter === "unread" ? "notifications-outline" : "notifications-off-outline"}
@@ -193,33 +298,50 @@ export default function UserNotification({ token, user, onClear }) {
             </Text>
           </View>
         ) : (
-          displayed.map((n) => (
-            <TouchableOpacity
-              key={n.id}
-              style={[styles.notifCard, n.read && styles.notifCardRead]}
-              onPress={() => markAsRead(n.id)}
-              activeOpacity={0.88}
-            >
-              {/* Icon */}
-              <View style={[styles.notifIcon, { backgroundColor: n.bgColor }]}>
-                <Ionicons name={n.icon} size={22} color={n.iconColor} />
-              </View>
-
-              {/* Content */}
-              <View style={styles.notifContent}>
-                <View style={styles.notifTitleRow}>
-                  <Text style={[styles.notifTitle, n.read && styles.notifTitleRead]}>
-                    {n.title}
-                  </Text>
-                  {!n.read && <View style={styles.unreadDot} />}
+          displayed.map((n) => {
+            const style = getNotificationStyle(n.type);
+            return (
+              <TouchableOpacity
+                key={n.id}
+                style={[styles.notifCard, n.read && styles.notifCardRead]}
+                onPress={() => markAsRead(n.id)}
+                onLongPress={() => {
+                  Alert.alert(
+                    "Delete Notification",
+                    "Are you sure you want to delete this notification?",
+                    [
+                      { text: "Cancel", style: "cancel" },
+                      { 
+                        text: "Delete", 
+                        style: "destructive",
+                        onPress: () => deleteNotification(n.id)
+                      },
+                    ]
+                  );
+                }}
+                activeOpacity={0.88}
+              >
+                {/* Icon */}
+                <View style={[styles.notifIcon, { backgroundColor: style.bgColor }]}>
+                  <Ionicons name={style.icon} size={22} color={style.iconColor} />
                 </View>
-                <Text style={[styles.notifMessage, n.read && styles.notifMessageRead]}>
-                  {n.message}
-                </Text>
-                <Text style={styles.notifTime}>{n.time}</Text>
-              </View>
-            </TouchableOpacity>
-          ))
+
+                {/* Content */}
+                <View style={styles.notifContent}>
+                  <View style={styles.notifTitleRow}>
+                    <Text style={[styles.notifTitle, n.read && styles.notifTitleRead]}>
+                      {n.title}
+                    </Text>
+                    {!n.read && <View style={styles.unreadDot} />}
+                  </View>
+                  <Text style={[styles.notifMessage, n.read && styles.notifMessageRead]}>
+                    {n.message}
+                  </Text>
+                  <Text style={styles.notifTime}>{n.time}</Text>
+                </View>
+              </TouchableOpacity>
+            );
+          })
         )}
         <View style={{ height: 16 }} />
       </ScrollView>

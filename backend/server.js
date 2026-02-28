@@ -112,6 +112,21 @@ const messageSchema = new mongoose.Schema({
 
 const Message = mongoose.model("Message", messageSchema);
 
+// ─── NOTIFICATION SCHEMA ─────────────────────────────────────────────────────
+const notificationSchema = new mongoose.Schema({
+  recipientId:           { type: mongoose.Schema.Types.ObjectId, required: true },
+  recipientType:         { type: String, required: true, enum: ["user", "responder"] },
+  type:                  { type: String, required: true, enum: ["report", "post", "admin_request", "comment", "like", "system"] },
+  title:                 { type: String, required: true },
+  message:               { type: String, required: true },
+  relatedId:             { type: mongoose.Schema.Types.ObjectId, default: null },
+  relatedType:           { type: String, enum: ["report", "post", "user", "responder"], default: null },
+  read:                  { type: Boolean, default: false },
+  createdAt:             { type: Date, default: Date.now },
+});
+
+const Notification = mongoose.model("Notification", notificationSchema);
+
 // ─── MULTER CONFIGURATION FOR FILE UPLOADS ──────────────────────────────────
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
@@ -870,6 +885,32 @@ app.post("/api/newsfeed", authMiddleware, upload.fields([
 
     await newPost.save();
 
+    // Create notification for all admins
+    const admins = await Responder.find({ accountType: "ADMIN", isApproved: true });
+    const notifications = admins.map(admin => ({
+      recipientId: admin._id,
+      recipientType: "responder",
+      type: "post",
+      title: "New Post Created",
+      message: `${req.user.fullName} created a new ${category} post`,
+      relatedId: newPost._id,
+      relatedType: "post",
+    }));
+    
+    if (notifications.length > 0) {
+      await Notification.insertMany(notifications);
+      
+      // Emit real-time notification to all admins
+      admins.forEach(admin => {
+        io.to(`user_${admin._id}`).emit("new_notification", {
+          type: "post",
+          title: "New Post Created",
+          message: `${req.user.fullName} created a new ${category} post`,
+          timestamp: new Date(),
+        });
+      });
+    }
+
     return res.status(201).json({
       success: true,
       message: "Post created successfully",
@@ -1362,6 +1403,32 @@ app.post("/api/responder/register", async (req, res) => {
     if (isAdmin) {
       // Send admin request notification (no verification link)
       await sendAdminRequestEmail(email, fullName);
+      
+      // Create notification for all existing admins
+      const existingAdmins = await Responder.find({ accountType: "ADMIN", isApproved: true });
+      const notifications = existingAdmins.map(admin => ({
+        recipientId: admin._id,
+        recipientType: "responder",
+        type: "admin_request",
+        title: "New Admin Request",
+        message: `${fullName} requested admin access`,
+        relatedId: newResponder._id,
+        relatedType: "responder",
+      }));
+      
+      if (notifications.length > 0) {
+        await Notification.insertMany(notifications);
+        
+        // Emit real-time notification to all admins
+        existingAdmins.forEach(admin => {
+          io.to(`user_${admin._id}`).emit("new_notification", {
+            type: "admin_request",
+            title: "New Admin Request",
+            message: `${fullName} requested admin access`,
+            timestamp: new Date(),
+          });
+        });
+      }
     } else {
       // Send regular verification email for BARANGAY/POSO
       await sendVerificationEmail(email, verificationToken);
@@ -1538,6 +1605,86 @@ app.post("/api/responder/approve-admin", async (req, res) => {
     });
   } catch (error) {
     console.error("Approve admin error:", error);
+    return res.status(500).json({ success: false, message: "Server error" });
+  }
+});
+
+// ─── GET DASHBOARD STATISTICS ────────────────────────────────────────────────
+app.get("/api/dashboard/stats", authMiddleware, async (req, res) => {
+  try {
+    // Get total users count
+    const totalUsers = await User.countDocuments({ isEmailVerified: true });
+    
+    // Get total responders count (approved only)
+    const totalResponders = await Responder.countDocuments({ isApproved: true });
+    
+    // Get pending admin requests
+    const pendingAdminRequests = await Responder.countDocuments({
+      accountType: "ADMIN",
+      approvalStatus: "pending",
+      isApproved: false,
+    });
+    
+    // Get total newsfeed posts
+    const totalPosts = await NewsfeedPost.countDocuments();
+    
+    // Get recent posts (last 7 days)
+    const sevenDaysAgo = new Date();
+    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+    const recentPosts = await NewsfeedPost.countDocuments({
+      createdAt: { $gte: sevenDaysAgo }
+    });
+    
+    // Get weekly post activity (last 7 days)
+    const weeklyActivity = await NewsfeedPost.aggregate([
+      {
+        $match: {
+          createdAt: { $gte: sevenDaysAgo }
+        }
+      },
+      {
+        $group: {
+          _id: { $dayOfWeek: "$createdAt" },
+          count: { $sum: 1 }
+        }
+      },
+      {
+        $sort: { _id: 1 }
+      }
+    ]);
+    
+    // Format weekly data (1=Sunday, 2=Monday, etc.)
+    const dayNames = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+    const weeklyData = Array(7).fill(0).map((_, index) => {
+      const dayOfWeek = index === 0 ? 1 : index + 1; // Adjust for MongoDB's day numbering
+      const activity = weeklyActivity.find(a => a._id === dayOfWeek);
+      return {
+        day: dayNames[index],
+        count: activity ? activity.count : 0
+      };
+    });
+    
+    // Get recent newsfeed posts
+    const recentNewsfeedPosts = await NewsfeedPost.find()
+      .sort({ createdAt: -1 })
+      .limit(5)
+      .populate("authorId", "fullName email")
+      .lean();
+    
+    return res.status(200).json({
+      success: true,
+      stats: {
+        totalUsers,
+        totalResponders,
+        pendingAdminRequests,
+        totalPosts,
+        recentPosts,
+        weeklyData,
+        recentNewsfeedPosts
+      }
+    });
+  } catch (error) {
+    console.error("Get dashboard stats error:", error);
     return res.status(500).json({ success: false, message: "Server error" });
   }
 });
@@ -1942,6 +2089,126 @@ io.on("connection", (socket) => {
       }
     }
   });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// ═══ NOTIFICATION ENDPOINTS ════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════════════════
+
+// ─── GET NOTIFICATIONS ───────────────────────────────────────────────────────
+app.get("/api/notifications", async (req, res) => {
+  try {
+    const { userId, userType } = req.query;
+
+    if (!userId || !userType) {
+      return res.status(400).json({ success: false, message: "userId and userType are required" });
+    }
+
+    const notifications = await Notification.find({
+      recipientId: userId,
+      recipientType: userType,
+    })
+      .sort({ createdAt: -1 })
+      .limit(50)
+      .lean();
+
+    const formattedNotifications = notifications.map(notif => ({
+      id: notif._id,
+      type: notif.type,
+      title: notif.title,
+      message: notif.message,
+      read: notif.read,
+      relatedId: notif.relatedId,
+      relatedType: notif.relatedType,
+      time: getTimeAgo(notif.createdAt),
+      timestamp: notif.createdAt,
+    }));
+
+    const unreadCount = notifications.filter(n => !n.read).length;
+
+    return res.status(200).json({
+      success: true,
+      notifications: formattedNotifications,
+      unreadCount,
+    });
+  } catch (error) {
+    console.error("Get notifications error:", error);
+    return res.status(500).json({ success: false, message: "Server error" });
+  }
+});
+
+// ─── MARK NOTIFICATION AS READ ───────────────────────────────────────────────
+app.put("/api/notifications/:notificationId/read", async (req, res) => {
+  try {
+    const { notificationId } = req.params;
+
+    const notification = await Notification.findByIdAndUpdate(
+      notificationId,
+      { read: true },
+      { new: true }
+    );
+
+    if (!notification) {
+      return res.status(404).json({ success: false, message: "Notification not found" });
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: "Notification marked as read",
+    });
+  } catch (error) {
+    console.error("Mark notification as read error:", error);
+    return res.status(500).json({ success: false, message: "Server error" });
+  }
+});
+
+// ─── MARK ALL NOTIFICATIONS AS READ ──────────────────────────────────────────
+app.put("/api/notifications/mark-all-read", async (req, res) => {
+  try {
+    const { userId, userType } = req.body;
+
+    if (!userId || !userType) {
+      return res.status(400).json({ success: false, message: "userId and userType are required" });
+    }
+
+    await Notification.updateMany(
+      {
+        recipientId: userId,
+        recipientType: userType,
+        read: false,
+      },
+      { read: true }
+    );
+
+    return res.status(200).json({
+      success: true,
+      message: "All notifications marked as read",
+    });
+  } catch (error) {
+    console.error("Mark all notifications as read error:", error);
+    return res.status(500).json({ success: false, message: "Server error" });
+  }
+});
+
+// ─── DELETE NOTIFICATION ─────────────────────────────────────────────────────
+app.delete("/api/notifications/:notificationId", async (req, res) => {
+  try {
+    const { notificationId } = req.params;
+
+    const notification = await Notification.findByIdAndDelete(notificationId);
+
+    if (!notification) {
+      return res.status(404).json({ success: false, message: "Notification not found" });
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: "Notification deleted",
+    });
+  } catch (error) {
+    console.error("Delete notification error:", error);
+    return res.status(500).json({ success: false, message: "Server error" });
+  }
 });
 
 // ─── START SERVER ────────────────────────────────────────────────────────────

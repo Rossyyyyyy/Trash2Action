@@ -6,10 +6,26 @@ import {
   ScrollView,
   TouchableOpacity,
   Alert,
+  Image,
+  Modal,
+  TextInput,
 } from "react-native";
 import { useState } from "react";
 import { LinearGradient } from "expo-linear-gradient";
 import { Ionicons } from "@expo/vector-icons";
+import * as ImagePicker from "expo-image-picker";
+
+// ─── Taguig Barangays & Creeks ──────────────────────────────────────────────
+const TAGUIG_BARANGAYS = {
+  "Ligid-Tipas": {
+    creeks: ["Creek A - Ligid", "Creek B - Ligid", "Creek C - Ligid"],
+    heatmapAreas: ["Zone 1", "Zone 2", "Zone 3"],
+  },
+  "Palingod-Tipas": {
+    creeks: ["Creek A - Palingod", "Creek B - Palingod", "Creek C - Palingod"],
+    heatmapAreas: ["Zone 1", "Zone 2", "Zone 3"],
+  },
+};
 
 // ─── Status config ───────────────────────────────────────────────────────────
 const STATUS_CONFIG = {
@@ -104,12 +120,91 @@ export default function UserReports({ token, user }) {
   const [reports, setReports] = useState(SAMPLE_REPORTS);
   const [activeTab, setActiveTab] = useState("all");
   const [expandedId, setExpandedId] = useState(null);
+  
+  // New report modal states
+  const [showNewReportModal, setShowNewReportModal] = useState(false);
+  const [selectedCity, setSelectedCity] = useState(null);
+  const [selectedBarangay, setSelectedBarangay] = useState(null);
+  const [selectedLocation, setSelectedLocation] = useState(null);
+  const [reportDescription, setReportDescription] = useState("");
+  const [uploadedMedia, setUploadedMedia] = useState([]);
+  const [showBarangayMenu, setShowBarangayMenu] = useState(false);
+  const [showLocationMenu, setShowLocationMenu] = useState(false);
 
   const tabs = [
     { id: "all", label: "All" },
     { id: "active", label: "Active" },
     { id: "completed", label: "Done" },
   ];
+
+  // ─── Media picker ────────────────────────────────────────────────────────
+  const pickMedia = async () => {
+    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (status !== "granted") {
+      Alert.alert("Permission Required", "Please allow access to your media library.");
+      return;
+    }
+
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.All,
+      allowsMultipleSelection: true,
+      quality: 0.8,
+    });
+
+    if (!result.canceled) {
+      setUploadedMedia([...uploadedMedia, ...result.assets]);
+    }
+  };
+
+  const removeMedia = (index) => {
+    setUploadedMedia(uploadedMedia.filter((_, i) => i !== index));
+  };
+
+  // ─── Reset new report form ───────────────────────────────────────────────
+  const resetNewReportForm = () => {
+    setSelectedCity(null);
+    setSelectedBarangay(null);
+    setSelectedLocation(null);
+    setReportDescription("");
+    setUploadedMedia([]);
+    setShowBarangayMenu(false);
+    setShowLocationMenu(false);
+  };
+
+  // ─── Submit new report ───────────────────────────────────────────────────
+  const handleSubmitReport = () => {
+    if (!selectedCity || !selectedBarangay || !selectedLocation) {
+      Alert.alert("Incomplete", "Please select city, barangay, and location.");
+      return;
+    }
+    if (uploadedMedia.length === 0) {
+      Alert.alert("Media Required", "Please upload at least one photo or video.");
+      return;
+    }
+    if (!reportDescription.trim()) {
+      Alert.alert("Description Required", "Please provide a description.");
+      return;
+    }
+
+    // Create new report
+    const newReport = {
+      id: `r${Date.now()}`,
+      reportNo: `#${1043 + reports.length}`,
+      title: `Report at ${selectedLocation}`,
+      location: `${selectedBarangay}, ${selectedCity}`,
+      category: "general",
+      status: "pending",
+      pointsEarned: 0,
+      date: new Date().toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }),
+      description: reportDescription,
+      media: uploadedMedia,
+    };
+
+    setReports([newReport, ...reports]);
+    setShowNewReportModal(false);
+    resetNewReportForm();
+    Alert.alert("Success", "Your report has been submitted!");
+  };
 
   // ─── Delete/Cancel report ────────────────────────────────────────────────
   const handleDeleteReport = (reportId, reportNo) => {
@@ -145,7 +240,7 @@ export default function UserReports({ token, user }) {
         <Text style={styles.headerTitle}>My Reports</Text>
         <TouchableOpacity
           style={styles.newReportBtn}
-          onPress={() => Alert.alert("New Report", "Feature coming soon!")}
+          onPress={() => setShowNewReportModal(true)}
         >
           <Ionicons name="add-circle" size={22} color="#FFFFFF" />
           <Text style={styles.newReportText}>New</Text>
@@ -316,6 +411,162 @@ export default function UserReports({ token, user }) {
         )}
         <View style={{ height: 16 }} />
       </ScrollView>
+
+      {/* New Report Modal */}
+      <Modal
+        visible={showNewReportModal}
+        animationType="slide"
+        transparent={true}
+        onRequestClose={() => {
+          setShowNewReportModal(false);
+          resetNewReportForm();
+        }}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContainer}>
+            <ScrollView showsVerticalScrollIndicator={false}>
+              {/* Modal Header */}
+              <View style={styles.modalHeader}>
+                <Text style={styles.modalTitle}>New Report</Text>
+                <TouchableOpacity onPress={() => {
+                  setShowNewReportModal(false);
+                  resetNewReportForm();
+                }}>
+                  <Ionicons name="close" size={28} color="#424242" />
+                </TouchableOpacity>
+              </View>
+
+              {/* City Selection */}
+              <View style={styles.formSection}>
+                <Text style={styles.formLabel}>City</Text>
+                <TouchableOpacity
+                  style={styles.selectButton}
+                  onPress={() => {
+                    setSelectedCity("Taguig");
+                    setShowBarangayMenu(true);
+                    setSelectedBarangay(null);
+                    setSelectedLocation(null);
+                  }}
+                >
+                  <Text style={selectedCity ? styles.selectButtonTextSelected : styles.selectButtonText}>
+                    {selectedCity || "Select City"}
+                  </Text>
+                  <Ionicons name="chevron-down" size={20} color="#757575" />
+                </TouchableOpacity>
+              </View>
+
+              {/* Barangay Selection */}
+              {showBarangayMenu && (
+                <View style={styles.formSection}>
+                  <Text style={styles.formLabel}>Barangay</Text>
+                  {Object.keys(TAGUIG_BARANGAYS).map((barangay) => (
+                    <TouchableOpacity
+                      key={barangay}
+                      style={[
+                        styles.menuItem,
+                        selectedBarangay === barangay && styles.menuItemSelected
+                      ]}
+                      onPress={() => {
+                        setSelectedBarangay(barangay);
+                        setShowLocationMenu(true);
+                        setSelectedLocation(null);
+                      }}
+                    >
+                      <Text style={[
+                        styles.menuItemText,
+                        selectedBarangay === barangay && styles.menuItemTextSelected
+                      ]}>
+                        {barangay}
+                      </Text>
+                      {selectedBarangay === barangay && (
+                        <Ionicons name="checkmark-circle" size={20} color="#2E7D32" />
+                      )}
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              )}
+
+              {/* Location Selection (Creeks/Heatmap) */}
+              {showLocationMenu && selectedBarangay && (
+                <View style={styles.formSection}>
+                  <Text style={styles.formLabel}>Location (Creek/Area)</Text>
+                  {[
+                    ...TAGUIG_BARANGAYS[selectedBarangay].creeks,
+                    ...TAGUIG_BARANGAYS[selectedBarangay].heatmapAreas
+                  ].map((location) => (
+                    <TouchableOpacity
+                      key={location}
+                      style={[
+                        styles.menuItem,
+                        selectedLocation === location && styles.menuItemSelected
+                      ]}
+                      onPress={() => setSelectedLocation(location)}
+                    >
+                      <Text style={[
+                        styles.menuItemText,
+                        selectedLocation === location && styles.menuItemTextSelected
+                      ]}>
+                        {location}
+                      </Text>
+                      {selectedLocation === location && (
+                        <Ionicons name="checkmark-circle" size={20} color="#2E7D32" />
+                      )}
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              )}
+
+              {/* Description */}
+              <View style={styles.formSection}>
+                <Text style={styles.formLabel}>Description</Text>
+                <TextInput
+                  style={styles.textInput}
+                  placeholder="Describe the waste issue..."
+                  placeholderTextColor="#9E9E9E"
+                  multiline
+                  numberOfLines={4}
+                  value={reportDescription}
+                  onChangeText={setReportDescription}
+                />
+              </View>
+
+              {/* Media Upload */}
+              <View style={styles.formSection}>
+                <Text style={styles.formLabel}>Upload Photo/Video</Text>
+                <TouchableOpacity style={styles.uploadButton} onPress={pickMedia}>
+                  <Ionicons name="cloud-upload-outline" size={24} color="#2E7D32" />
+                  <Text style={styles.uploadButtonText}>Choose Media</Text>
+                </TouchableOpacity>
+
+                {/* Media Preview */}
+                {uploadedMedia.length > 0 && (
+                  <View style={styles.mediaPreviewContainer}>
+                    {uploadedMedia.map((media, index) => (
+                      <View key={index} style={styles.mediaPreviewItem}>
+                        <Image source={{ uri: media.uri }} style={styles.mediaPreview} />
+                        <TouchableOpacity
+                          style={styles.removeMediaButton}
+                          onPress={() => removeMedia(index)}
+                        >
+                          <Ionicons name="close-circle" size={24} color="#D32F2F" />
+                        </TouchableOpacity>
+                      </View>
+                    ))}
+                  </View>
+                )}
+              </View>
+
+              {/* Submit Button */}
+              <TouchableOpacity
+                style={styles.submitButton}
+                onPress={handleSubmitReport}
+              >
+                <Text style={styles.submitButtonText}>Submit Report</Text>
+              </TouchableOpacity>
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
     </LinearGradient>
   );
 }
@@ -520,4 +771,149 @@ const styles = StyleSheet.create({
   actionButtonDanger: { borderColor: "#FFCDD2", backgroundColor: "#FFEBEE" },
   actionButtonText: { fontSize: 14, color: "#2196F3", fontWeight: "600" },
   actionButtonTextDanger: { color: "#D32F2F" },
+
+  // Modal
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.5)",
+    justifyContent: "flex-end",
+  },
+  modalContainer: {
+    backgroundColor: "#FFFFFF",
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    paddingHorizontal: 20,
+    paddingTop: 20,
+    paddingBottom: 40,
+    maxHeight: "90%",
+  },
+  modalHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: 20,
+  },
+  modalTitle: {
+    fontSize: 22,
+    fontWeight: "bold",
+    color: "#1B5E20",
+  },
+
+  // Form
+  formSection: {
+    marginBottom: 20,
+  },
+  formLabel: {
+    fontSize: 14,
+    fontWeight: "600",
+    color: "#424242",
+    marginBottom: 8,
+  },
+  selectButton: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    backgroundColor: "#F5F5F5",
+    borderRadius: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 14,
+    borderWidth: 1,
+    borderColor: "#E0E0E0",
+  },
+  selectButtonText: {
+    fontSize: 14,
+    color: "#9E9E9E",
+  },
+  selectButtonTextSelected: {
+    fontSize: 14,
+    color: "#212121",
+    fontWeight: "600",
+  },
+  menuItem: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    backgroundColor: "#F5F5F5",
+    borderRadius: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    marginBottom: 8,
+    borderWidth: 1,
+    borderColor: "#E0E0E0",
+  },
+  menuItemSelected: {
+    backgroundColor: "#E8F5E9",
+    borderColor: "#2E7D32",
+  },
+  menuItemText: {
+    fontSize: 14,
+    color: "#424242",
+  },
+  menuItemTextSelected: {
+    fontSize: 14,
+    color: "#1B5E20",
+    fontWeight: "600",
+  },
+  textInput: {
+    backgroundColor: "#F5F5F5",
+    borderRadius: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    fontSize: 14,
+    color: "#212121",
+    borderWidth: 1,
+    borderColor: "#E0E0E0",
+    textAlignVertical: "top",
+    minHeight: 100,
+  },
+  uploadButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    backgroundColor: "#E8F5E9",
+    borderRadius: 10,
+    paddingVertical: 14,
+    borderWidth: 1,
+    borderColor: "#2E7D32",
+    borderStyle: "dashed",
+  },
+  uploadButtonText: {
+    fontSize: 14,
+    color: "#2E7D32",
+    fontWeight: "600",
+  },
+  mediaPreviewContainer: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 10,
+    marginTop: 12,
+  },
+  mediaPreviewItem: {
+    position: "relative",
+  },
+  mediaPreview: {
+    width: 100,
+    height: 100,
+    borderRadius: 10,
+  },
+  removeMediaButton: {
+    position: "absolute",
+    top: -8,
+    right: -8,
+    backgroundColor: "#FFFFFF",
+    borderRadius: 12,
+  },
+  submitButton: {
+    backgroundColor: "#2E7D32",
+    borderRadius: 10,
+    paddingVertical: 14,
+    alignItems: "center",
+    marginTop: 10,
+  },
+  submitButtonText: {
+    fontSize: 16,
+    color: "#FFFFFF",
+    fontWeight: "bold",
+  },
 });

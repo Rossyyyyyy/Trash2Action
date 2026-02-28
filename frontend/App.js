@@ -18,6 +18,7 @@ import AdminDashboard from "./components/Responders/Admin/AdminDashboard";
 import AdminRequest from "./components/Responders/Admin/AdminRequest";
 import AdminNewsfeed from "./components/Responders/Admin/AdminNewsfeed";
 import AdminNotif from "./components/Responders/Admin/AdminNotif";
+import AdminProfile from "./components/Responders/Admin/AdminProfile";
 import UserDashboard from "./components/User/Dashboard/UserDashboard";
 import UserNF from "./components/User/Dashboard/UserNF";
 
@@ -209,6 +210,7 @@ export default function App() {
         <Stack.Screen name="AdminRequest" component={AdminRequest} />
         <Stack.Screen name="AdminNewsfeed" component={AdminNewsfeed} />
         <Stack.Screen name="AdminNotif" component={AdminNotif} />
+        <Stack.Screen name="AdminProfile" component={AdminProfile} />
         <Stack.Screen name="UserDashboard" component={UserDashboard} />
         <Stack.Screen name="UserNF" component={UserNF} />
       </Stack.Navigator>
