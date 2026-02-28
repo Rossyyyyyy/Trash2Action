@@ -1,0 +1,23 @@
+# YOLOv8 Waste Detection Service Requirements
+
+# Core ML libraries
+ultralytics>=8.0.0
+torch>=2.0.0
+torchvision>=0.15.0
+
+# Image processing
+Pillow>=10.0.0
+opencv-python>=4.8.0
+numpy>=1.24.0
+
+# Web service
+flask>=3.0.0
+flask-cors>=4.0.0
+
+# Dataset and annotation tools
+roboflow>=1.1.0
+supervision>=0.16.0
+
+# Utilities
+requests>=2.31.0
+python-dotenv>=1.0.0

@@ -13,5 +13,5 @@
     "**/*.tsx",
     ".expo/types/**/*.ts",
     "expo-env.d.ts"
-, "components/User/Dashboard/UserReports.js", "components/User/Dashboard/UserProfile.js", "components/User/Dashboard/UserNotification.js", "components/User/Dashboard/UserNF.js", "components/User/Dashboard/UserDashboard.js", "components/User/UserRegister.js", "components/User/UserLogin.js", "components/Out/OutIndex.js"  ]
+, "components/User/Reports/UserReports.js", "components/User/Dashboard/UserProfile.js", "components/User/Dashboard/UserNotification.js", "components/User/Dashboard/UserNF.js", "components/User/Dashboard/UserDashboard.js", "components/User/UserRegister.js", "components/User/UserLogin.js", "components/Out/OutIndex.js"  ]
 }

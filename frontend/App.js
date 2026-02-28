@@ -1,7 +1,8 @@
 import { Text, View, StyleSheet, TouchableOpacity, Dimensions, Animated } from "react-native";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { LinearGradient } from "expo-linear-gradient";
 import { MaterialIcons, Ionicons, FontAwesome5 } from "@expo/vector-icons";
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 // Navigation
 import { NavigationContainer } from "@react-navigation/native";
@@ -17,6 +18,7 @@ import AdminDashboard from "./components/Responders/Admin/AdminDashboard";
 import AdminRequest from "./components/Responders/Admin/AdminRequest";
 import AdminNewsfeed from "./components/Responders/Admin/AdminNewsfeed";
 import AdminNotif from "./components/Responders/Admin/AdminNotif";
+import AdminProfile from "./components/Responders/Admin/AdminProfile";
 import UserDashboard from "./components/User/Dashboard/UserDashboard";
 import UserNF from "./components/User/Dashboard/UserNF";
 
@@ -154,10 +156,48 @@ function Feature({ icon, text }) {
    MAIN APP
 ───────────────────────────────────────────── */
 export default function App() {
+  const [isCheckingAuth, setIsCheckingAuth] = useState(true);
+  const [initialRoute, setInitialRoute] = useState("Splash");
+
+  useEffect(() => {
+    checkAuthStatus();
+  }, []);
+
+  const checkAuthStatus = async () => {
+    try {
+      const token = await AsyncStorage.getItem('userToken');
+      const userData = await AsyncStorage.getItem('userData');
+      
+      if (token && userData) {
+        // User is logged in, skip splash and go directly to dashboard
+        setInitialRoute("UserDashboard");
+      } else {
+        setInitialRoute("Splash");
+      }
+    } catch (error) {
+      console.error("Error checking auth status:", error);
+      setInitialRoute("Splash");
+    } finally {
+      setIsCheckingAuth(false);
+    }
+  };
+
+  if (isCheckingAuth) {
+    // Show a simple loading screen while checking auth
+    return (
+      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#EAF7F1' }}>
+        <MaterialIcons name="recycling" size={64} color="#2E7D32" />
+        <Text style={{ marginTop: 16, fontSize: 18, color: '#2E7D32', fontWeight: 'bold' }}>
+          Trash2Action
+        </Text>
+      </View>
+    );
+  }
+
   return (
     <NavigationContainer>
       <Stack.Navigator
-        initialRouteName="Splash"
+        initialRouteName={initialRoute}
         screenOptions={{ headerShown: false }}
       >
         <Stack.Screen name="Splash" component={SplashScreen} />
@@ -170,6 +210,7 @@ export default function App() {
         <Stack.Screen name="AdminRequest" component={AdminRequest} />
         <Stack.Screen name="AdminNewsfeed" component={AdminNewsfeed} />
         <Stack.Screen name="AdminNotif" component={AdminNotif} />
+        <Stack.Screen name="AdminProfile" component={AdminProfile} />
         <Stack.Screen name="UserDashboard" component={UserDashboard} />
         <Stack.Screen name="UserNF" component={UserNF} />
       </Stack.Navigator>
