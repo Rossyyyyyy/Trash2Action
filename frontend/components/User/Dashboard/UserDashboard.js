@@ -18,6 +18,7 @@ import UserNotification from "./UserNotification";
 import UserReports from "../Reports/UserReports";
 import UserProfile from "./UserProfile";
 import UserMessage from "./UserMessage";
+import BasuraType from "../Basura/BasuraType";
 
 export default function UserDashboard({ route, navigation }) {
   // ✅ Get token and user from route params OR AsyncStorage
@@ -28,6 +29,7 @@ export default function UserDashboard({ route, navigation }) {
   const [isLoading, setIsLoading] = useState(true);
   const [showMessages, setShowMessages] = useState(false);
   const [unreadMessages, setUnreadMessages] = useState(0);
+  const [showBasuraType, setShowBasuraType] = useState(false);
 
   // ─── Load user data from AsyncStorage if not in route params ────────────
   useEffect(() => {
@@ -149,7 +151,7 @@ export default function UserDashboard({ route, navigation }) {
         return <UserProfile token={token} user={user} onLogout={handleLogout} />;
       case "dashboard":
       default:
-        return <DashboardHome token={token} user={user} onLogout={handleLogout} />;
+        return <DashboardHome token={token} user={user} onLogout={handleLogout} onOpenBasuraType={() => setShowBasuraType(true)} />;
     }
   };
 
@@ -200,6 +202,15 @@ export default function UserDashboard({ route, navigation }) {
         />
       )}
 
+      {/* ── Basura Type Scanner Modal ── */}
+      {showBasuraType && (
+        <BasuraType
+          token={token}
+          user={user}
+          onClose={() => setShowBasuraType(false)}
+        />
+      )}
+
       {/* ── Bottom Footer Navigation ── */}
       <View style={styles.footer}>
         {tabs.map((tab) => {
@@ -239,7 +250,7 @@ export default function UserDashboard({ route, navigation }) {
 }
 
 // ─── DASHBOARD HOME (inline — the default tab content) ──────────────────────
-function DashboardHome({ token, user, onLogout }) {
+function DashboardHome({ token, user, onLogout, onOpenBasuraType }) {
   const [chartPeriod, setChartPeriod] = useState("week");
   const [dashboardData, setDashboardData] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -389,7 +400,11 @@ function DashboardHome({ token, user, onLogout }) {
           <Text style={styles.sectionTitle}>Waste Management</Text>
           
           <View style={styles.collageGrid}>
-            <TouchableOpacity style={[styles.collageButton, styles.collageButtonLarge]} activeOpacity={0.8}>
+            <TouchableOpacity 
+              style={[styles.collageButton, styles.collageButtonLarge]} 
+              activeOpacity={0.8}
+              onPress={onOpenBasuraType}
+            >
               <LinearGradient
                 colors={["#4CAF50", "#66BB6A"]}
                 style={styles.collageGradient}

@@ -2211,6 +2211,211 @@ app.delete("/api/notifications/:notificationId", async (req, res) => {
   }
 });
 
+// ─── WASTE DETECTION WITH YOLOV8 ─────────────────────────────────────────────
+const wasteUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 10 * 1024 * 1024 }, // 10MB limit
+  fileFilter: (req, file, cb) => {
+    if (file.mimetype.startsWith('image/')) {
+      cb(null, true);
+    } else {
+      cb(new Error('Only image files are allowed'));
+    }
+  }
+});
+
+app.post("/api/detect-waste", authMiddleware, wasteUpload.single('image'), async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ success: false, message: "No image provided" });
+    }
+
+    // Try to use Python YOLOv8 service if available
+    const YOLO_SERVICE_URL = process.env.YOLO_SERVICE_URL || 'http://localhost:5001/detect';
+    
+    try {
+      const FormData = require('form-data');
+      const axios = require('axios');
+      
+      const formData = new FormData();
+      formData.append('image', req.file.buffer, {
+        filename: 'waste.jpg',
+        contentType: req.file.mimetype
+      });
+
+      const response = await axios.post(YOLO_SERVICE_URL, formData, {
+        headers: formData.getHeaders(),
+        timeout: 10000 // 10 second timeout
+      });
+
+      if (response.data.success) {
+        return res.status(200).json({
+          success: true,
+          result: response.data.result,
+          message: "Waste detected successfully"
+        });
+      }
+    } catch (yoloError) {
+      console.log("⚠️ YOLOv8 service unavailable, using mock detection:", yoloError.message);
+      // Fall back to mock detection if Python service is not available
+    }
+
+    // Mock detection result (fallback when Python service is unavailable)
+    const mockDetection = simulateWasteDetection();
+
+    return res.status(200).json({
+      success: true,
+      result: mockDetection,
+      message: "Waste detected successfully (demo mode)"
+    });
+
+  } catch (error) {
+    console.error("Waste detection error:", error);
+    return res.status(500).json({ 
+      success: false, 
+      message: "Failed to detect waste type" 
+    });
+  }
+});
+
+// ─── REAL-TIME WASTE DETECTION (Multiple Objects) ────────────────────────────
+app.post("/api/detect-waste-realtime", authMiddleware, wasteUpload.single('image'), async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ success: false, message: "No image provided" });
+    }
+
+    // Try to use Python YOLOv8 service if available
+    const YOLO_SERVICE_URL = process.env.YOLO_SERVICE_URL || 'http://localhost:5001/detect-multiple';
+    
+    try {
+      const FormData = require('form-data');
+      const axios = require('axios');
+      
+      const formData = new FormData();
+      formData.append('image', req.file.buffer, {
+        filename: 'frame.jpg',
+        contentType: req.file.mimetype
+      });
+
+      const response = await axios.post(YOLO_SERVICE_URL, formData, {
+        headers: formData.getHeaders(),
+        timeout: 5000 // 5 second timeout for real-time
+      });
+
+      if (response.data.success) {
+        return res.status(200).json({
+          success: true,
+          detections: response.data.detections,
+          message: "Objects detected"
+        });
+      }
+    } catch (yoloError) {
+      console.log("⚠️ YOLOv8 service unavailable for real-time:", yoloError.message);
+      // Fall back to mock detection
+    }
+
+    // Mock multiple detections for demo
+    const mockDetections = simulateMultipleDetections();
+
+    return res.status(200).json({
+      success: true,
+      detections: mockDetections,
+      message: "Objects detected (demo mode)"
+    });
+
+  } catch (error) {
+    console.error("Real-time detection error:", error);
+    return res.status(500).json({ 
+      success: false, 
+      message: "Failed to detect objects" 
+    });
+  }
+});
+
+// Mock function to simulate YOLOv8 detection
+// Replace this with actual YOLOv8 API integration
+function simulateWasteDetection() {
+  const wasteTypes = [
+    {
+      wasteType: "Plastic Bottle",
+      category: "Recyclable",
+      confidence: 95,
+      recommendation: "Place in recyclable bin. Rinse before disposal."
+    },
+    {
+      wasteType: "Food Waste",
+      category: "Biodegradable",
+      confidence: 88,
+      recommendation: "Dispose in compost bin or biodegradable waste container."
+    },
+    {
+      wasteType: "Paper",
+      category: "Recyclable",
+      confidence: 92,
+      recommendation: "Place in paper recycling bin. Keep dry."
+    },
+    {
+      wasteType: "Metal Can",
+      category: "Recyclable",
+      confidence: 97,
+      recommendation: "Rinse and place in metal recycling bin."
+    },
+    {
+      wasteType: "Glass Bottle",
+      category: "Recyclable",
+      confidence: 94,
+      recommendation: "Place in glass recycling bin. Remove caps."
+    },
+    {
+      wasteType: "Electronic Waste",
+      category: "Hazardous",
+      confidence: 85,
+      recommendation: "Take to e-waste collection center. Do not dispose in regular bins."
+    }
+  ];
+
+  // Return random waste type for demo
+  return wasteTypes[Math.floor(Math.random() * wasteTypes.length)];
+}
+
+// Mock function for multiple object detection (real-time)
+function simulateMultipleDetections() {
+  const screenWidth = 375; // Approximate screen width
+  const screenHeight = 667; // Approximate screen height
+  
+  const objects = [
+    { label: 'Plastic Bottle', confidence: 0.95, color: '#2196F3' },
+    { label: 'Paper', confidence: 0.88, color: '#4CAF50' },
+    { label: 'Metal Can', confidence: 0.92, color: '#FF9800' },
+    { label: 'Glass', confidence: 0.87, color: '#9C27B0' },
+    { label: 'Cardboard', confidence: 0.91, color: '#795548' },
+  ];
+
+  // Randomly select 1-3 objects to detect
+  const numObjects = Math.floor(Math.random() * 3) + 1;
+  const selectedObjects = [];
+  
+  for (let i = 0; i < numObjects; i++) {
+    const obj = objects[Math.floor(Math.random() * objects.length)];
+    const x = Math.random() * (screenWidth - 150);
+    const y = Math.random() * (screenHeight - 200) + 100;
+    const width = Math.random() * 100 + 80;
+    const height = Math.random() * 120 + 100;
+    
+    selectedObjects.push({
+      label: obj.label,
+      confidence: obj.confidence,
+      x: x,
+      y: y,
+      width: width,
+      height: height,
+    });
+  }
+
+  return selectedObjects;
+}
+
 // ─── START SERVER ────────────────────────────────────────────────────────────
 server.listen(PORT, '0.0.0.0', () => {
   console.log(`\n🚀 Server running on:`);
